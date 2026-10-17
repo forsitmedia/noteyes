@@ -939,7 +939,7 @@ function gotoPage(i) {
 }
 $('#prev').onclick = () => gotoPage(visPage() - 1);
 $('#next').onclick = () => gotoPage(visPage() + 1);
-$('#addpage').onclick = () => { const at = visPage(); cur.pages.splice(at + 1, 0, blankPage()); undoStack = []; redoStack = []; gotoPage(at + 1); scheduleSave(); toast(`Page ${at + 2} added`); };
+$('#addpage').onclick = () => { const at = visPage(); cur.pages.splice(at + 1, 0, blankPage()); gotoPage(at + 1); scheduleSave(); toast(`Page ${at + 2} added`); };
 $('#fit').onclick = () => { view.user = false; fitView(cur.kind === 'notebook' ? visPage() : pageIdx); renderBase(); renderLive(); persistView(); };
 $('#paperbtn').onclick = (e) => {
   popover(e.currentTarget, PAPERS.map(([k, l]) => `<button class="row" data-a="${k}"><span style="width:14px">${k === cur.paper ? '✓' : ''}</span><span>${l}</span></button>`).join(''),
@@ -947,6 +947,7 @@ $('#paperbtn').onclick = (e) => {
 };
 $('#emore').onclick = (e) => {
   const nb = cur.kind === 'notebook';
+  if (nb) { const v = visPage(); if (v !== pageIdx) { commitText(); clearSel(); pageIdx = v; } }   // menu acts on the page shown in the counter
   popover(e.currentTarget, `
     <button class="row" data-a="clear">${ic('eraser')}<span>${nb ? 'Clear this page' : 'Clear whiteboard'}</span></button>
     <hr><button class="row" data-a="pdf">${ic('paper')}<span>Export as PDF<small>${nb ? 'All pages' : 'Whole board'}</small></span></button>
@@ -959,22 +960,23 @@ $('#emore').onclick = (e) => {
     if (a === 'delpage') {
       if (!b.dataset.armed) { b.dataset.armed = '1'; b.querySelector('span').textContent = 'Tap again to delete page'; return; }
       if (cur.pages.length === 1) cur.pages[0] = blankPage(); else cur.pages.splice(pageIdx, 1);
-      undoStack = []; redoStack = []; closeOverlay(); gotoPage(Math.min(pageIdx, cur.pages.length - 1)); scheduleSave(); toast('Page deleted');
+      closeOverlay(); gotoPage(Math.min(pageIdx, cur.pages.length - 1)); scheduleSave(); toast('Page deleted');
     }
   });
 };
 
 /* ================= undo / save ================= */
-function snap() { const p = page(); return { pi: pageIdx, strokes: p.strokes.slice(), images: p.images.map((o) => ({ ...o })), texts: p.texts.map((t) => ({ ...t })) }; }
-function pushUndo(s) { undoStack.push(s); if (undoStack.length > 200) undoStack.shift(); redoStack = []; updateChrome(); }
+function snap() { const p = page(); return { pg: p, strokes: p.strokes.slice(), images: p.images.map((o) => ({ ...o })), texts: p.texts.map((t) => ({ ...t })) }; }
+function pushUndo(s) { undoStack.push(s); if (undoStack.length > 500) undoStack.shift(); redoStack = []; updateChrome(); }
 function restore(from, to) {
   commitText();
-  const s = from.pop(); if (!s) return;
-  const p = cur.pages[s.pi]; if (!p) return;
-  sel = null;
-  to.push({ pi: s.pi, strokes: p.strokes.slice(), images: p.images.map((o) => ({ ...o })), texts: p.texts.map((t) => ({ ...t })) });
+  let s, p, pi = -1;
+  while (from.length) { s = from.pop(); pi = cur.pages.indexOf(s.pg); if (pi >= 0) break; }   // skip entries for pages that were deleted
+  if (pi < 0) { updateChrome(); return; }
+  p = s.pg; sel = null;
+  to.push({ pg: p, strokes: p.strokes.slice(), images: p.images.map((o) => ({ ...o })), texts: p.texts.map((t) => ({ ...t })) });
   p.strokes = s.strokes; p.images = s.images; p.texts = s.texts;
-  if (s.pi !== pageIdx) gotoPage(s.pi); else { renderBase(); renderLive(); }
+  if (pi !== pageIdx) gotoPage(pi); else { renderBase(); renderLive(); }
   updateChrome(); scheduleSave();
 }
 const doUndo = () => restore(undoStack, redoStack), doRedo = () => restore(redoStack, undoStack);
@@ -1244,7 +1246,7 @@ function moveGesture() {
 }
 function cancelAction() {
   if (!action) return;
-  if (action.before && action.changed) { const s = action.before, p = cur.pages[s.pi]; p.strokes = s.strokes; p.images = s.images; p.texts = s.texts; renderBase(); }
+  if (action.before && action.changed) { const s = action.before, p = s.pg; p.strokes = s.strokes; p.images = s.images; p.texts = s.texts; renderBase(); }
   action = null; eraserAt = null; lassoPts = null; renderLive();
 }
 
