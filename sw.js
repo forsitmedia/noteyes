@@ -1,6 +1,6 @@
 // NoteYes offline support.
 // Bump VERSION whenever you change index.html so iPads pick up the new version.
-const VERSION = 'noteyes-v2';
+const VERSION = 'noteyes-v3';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
