@@ -237,7 +237,8 @@ const DEFAULTS = {
   ball: { stab: 1, size: .8, op: 1, style: 'solid', color: '#3b7bea' },
   hl: { size: 1, op: .4, straight: false, color: '#f5c84c' },
   eraser: { mode: 'stroke', size: 2 },
-  text: { size: 28, color: '#111418' }
+  text: { size: 28, color: '#111418' },
+  bucket: { color: '#3b78e7' }
 };
 const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas', image: 'Image', bucket: 'Fill bucket' };
 
@@ -583,7 +584,7 @@ function buildRail() {
   const tools = ['fountain', 'ball', 'hl', 'eraser', 'lasso', 'text', 'bucket', 'hand'];
   const ct = colorTool(), cc = ct ? T[ct].color : null;
   $('#rail').innerHTML =
-    tools.map((k) => `<button class="ib" data-t="${k}" aria-label="${TOOL_NAMES[k]}" title="${TOOL_NAMES[k]}${T[k] && k !== 'bucket' ? ' · tap again for settings' : ''}" aria-pressed="${toolKind === k}">${ic(k)}${T[k] && T[k].color ? `<i class="dot" style="--c:${T[k].color}"></i>` : ''}</button>`).join('') +
+    tools.map((k) => `<button class="ib" data-t="${k}" aria-label="${TOOL_NAMES[k]}" title="${TOOL_NAMES[k]}${T[k] ? ' · tap again for settings' : ''}" aria-pressed="${toolKind === k}">${ic(k)}${T[k] && T[k].color ? `<i class="dot" style="--c:${T[k].color}"></i>` : ''}</button>`).join('') +
     `<button class="ib" data-t="image" aria-label="Image" title="Image · then tap where it goes" aria-pressed="${toolKind === 'image'}">${ic('image')}</button><hr>` +
     prefs.palette.slice(0, 6).map((c) => `<button class="sw" data-c="${c}" style="--c:${c}" aria-label="Color ${c}" aria-pressed="${c === cc}"><span></span></button>`).join('');
 }
@@ -591,10 +592,10 @@ $('#rail').addEventListener('click', (e) => {
   const t = e.target.closest('[data-t]'), c = e.target.closest('[data-c]');
   if (t) {
     const k = t.dataset.t;
-    if (k === toolKind && T[k] && k !== 'bucket') { openToolSettings(k, t); return; }
+    if (k === toolKind && T[k]) { openToolSettings(k, t); return; }
     setTool(k);
     if (k === 'image') toast('Tap on the page where the image should go');
-    if (k === 'bucket') toast('Tap inside a closed shape to fill it');
+    if (k === 'bucket') toast('Tap inside a shape to fill it · tap the bucket again for colors');
     if (T[k] && !prefs.hintShown) { prefs.hintShown = true; savePrefs(); toast('Tap the tool again to change its settings'); }
   }
   if (c) { const ct = colorTool() || (setTool('fountain'), 'fountain'); T[ct].color = c.dataset.c; savePrefs(); applyColorToEditing(); buildRail(); }
@@ -621,7 +622,7 @@ const TOOL_CTRLS = {
   fountain: ['stab', 'tip', 'sens', 'size', 'op'],
   ball: ['stab', 'size', 'op'],
   hl: ['size', 'op'],
-  eraser: [], text: []
+  eraser: [], text: [], bucket: []
 };
 const LINE_SVG = {
   solid: '<svg viewBox="0 0 60 18"><path d="M4 12c8-10 16-10 26-4s18 4 26-4"/></svg>',
@@ -1478,8 +1479,9 @@ function bucketFill(w) {
   let box = nb ? [0, 0, PAGE.w, PAGE.h] : bbox(pg);
   if (!box) { toast('Draw a closed shape first'); return; }
   if (!nb) box = [box[0] - 40, box[1] - 40, box[2] + 40, box[3] + 40];
-  const k = Math.min(1, 2400 / (box[2] - box[0]), 2400 / (box[3] - box[1]));
-  const rw = Math.ceil((box[2] - box[0]) * k), rh = Math.ceil((box[3] - box[1]) * k);
+  const bw = box[2] - box[0], bh = box[3] - box[1];
+  const k = Math.min(2, 2400 / bw, 2400 / bh, Math.sqrt(6e6 / (bw * bh)));   // 2x for crisp corners, capped for big boards
+  const rw = Math.ceil(bw * k), rh = Math.ceil(bh * k);
   const sx = Math.floor((w[0] - box[0]) * k), sy = Math.floor((w[1] - box[1]) * k);
   if (sx < 0 || sy < 0 || sx >= rw || sy >= rh) return;
   const cv = document.createElement('canvas'); cv.width = rw; cv.height = rh;
@@ -1488,27 +1490,47 @@ function bucketFill(w) {
   for (const st of pg.strokes) drawStroke(c, st);
   for (const t of pg.texts) drawText(c, t);
   const px = c.getImageData(0, 0, rw, rh).data, N = rw * rh;
-  let bar = new Uint8Array(N);
-  for (let i = 0; i < N; i++) if (px[i * 4 + 3] > 40) bar[i] = 1;
-  const grow = (src, r) => { for (let n = 0; n < r; n++) { const o = src.slice(); for (let y = 1; y < rh - 1; y++) for (let x = 1; x < rw - 1; x++) { const i = y * rw + x; if (!src[i] && (src[i - 1] || src[i + 1] || src[i - rw] || src[i + rw])) o[i] = 1; } src = o; } return src; };
-  bar = grow(bar, 2);
-  let seed = sy * rw + sx;
-  if (bar[seed]) { seed = -1; for (let r = 1; r < 10 && seed < 0; r++) for (let dy = -r; dy <= r && seed < 0; dy++) for (let dx = -r; dx <= r; dx++) { const x = sx + dx, y = sy + dy; if (x >= 0 && y >= 0 && x < rw && y < rh && !bar[y * rw + x]) { seed = y * rw + x; break; } } }
-  if (seed < 0) { toast('Tap inside a shape, not on its line'); return; }
-  const fill = new Uint8Array(N), stack = [seed]; fill[seed] = 1; let open = false, minX = rw, minY = rh, maxX = 0, maxY = 0;
-  while (stack.length) {
-    const i = stack.pop(), x = i % rw, y = (i - x) / rw;
-    if (x === 0 || y === 0 || x === rw - 1 || y === rh - 1) { open = true; break; }
-    if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
-    for (const j of [i - 1, i + 1, i - rw, i + rw]) if (!fill[j] && !bar[j]) { fill[j] = 1; stack.push(j); }
+  const bar0 = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (px[i * 4 + 3] > 24) bar0[i] = 1;
+  const grow = (src, r) => { for (let n = 0; n < r; n++) { const o = src.slice(); for (let y = 1; y < rh - 1; y++) for (let x = 1; x < rw - 1; x++) { const i = y * rw + x; if (!src[i] && (src[i - 1] || src[i + 1] || src[i - rw] || src[i + rw] || src[i - rw - 1] || src[i - rw + 1] || src[i + rw - 1] || src[i + rw + 1])) o[i] = 1; } src = o; } return src; };
+  const flood = (bar, seed) => {
+    const fill = new Uint8Array(N), stack = [seed]; fill[seed] = 1; let minX = rw, minY = rh, maxX = 0, maxY = 0;
+    while (stack.length) {
+      const i = stack.pop(), x = i % rw, y = (i - x) / rw;
+      if (x === 0 || y === 0 || x === rw - 1 || y === rh - 1) return null;   // leaked out: not closed
+      if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+      for (const j of [i - 1, i + 1, i - rw, i + rw]) if (!fill[j] && !bar[j]) { fill[j] = 1; stack.push(j); }
+    }
+    return { fill, minX, minY, maxX, maxY };
+  };
+  const nearFree = (bar) => {
+    let seed = sy * rw + sx; if (!bar[seed]) return seed;
+    for (let r = 1; r < 14; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = sx + dx, y = sy + dy; if (x >= 0 && y >= 0 && x < rw && y < rh && !bar[y * rw + x]) return y * rw + x; }
+    return -1;
+  };
+  /* first try the exact lines (sharp corners); only if that leaks, bridge small gaps in the stroke ends */
+  let res = null, tried = false;
+  for (const gap of [0, 2, 5]) {
+    const bar = gap ? grow(bar0, gap) : bar0, seed = nearFree(bar);
+    if (seed < 0) continue; tried = true;
+    res = flood(bar, seed); if (res) { res.gap = gap; break; }
   }
-  if (open) { toast("That shape isn't closed"); return; }
-  const m = grow(fill, 3), pad = 4, x0 = Math.max(0, minX - pad), y0 = Math.max(0, minY - pad), x1 = Math.min(rw - 1, maxX + pad), y1 = Math.min(rh - 1, maxY + pad);
+  if (!tried) { toast('Tap inside a shape, not on its line'); return; }
+  if (!res) { toast("That shape isn't closed"); return; }
+  const m = grow(res.fill, res.gap + 3), pad = 6, x0 = Math.max(0, res.minX - pad), y0 = Math.max(0, res.minY - pad), x1 = Math.min(rw - 1, res.maxX + pad), y1 = Math.min(rh - 1, res.maxY + pad);
   const ow = x1 - x0 + 1, oh = y1 - y0 + 1, oc = document.createElement('canvas'); oc.width = ow; oc.height = oh;
   const octx = oc.getContext('2d'), img = octx.createImageData(ow, oh), col = T.bucket.color.replace('#', ''), R = parseInt(col.slice(0, 2), 16), G = parseInt(col.slice(2, 4), 16), B = parseInt(col.slice(4, 6), 16);
   for (let y = 0; y < oh; y++) for (let x = 0; x < ow; x++) if (m[(y + y0) * rw + x + x0]) { const o = (y * ow + x) * 4; img.data[o] = R; img.data[o + 1] = G; img.data[o + 2] = B; img.data[o + 3] = 255; }
   octx.putImageData(img, 0, 0);
   pushUndo(snap());
+  // filling an area that is already filled replaces the old fill (so the colour can be changed)
+  const probe = document.createElement('canvas'); probe.width = probe.height = 1; const pc = probe.getContext('2d', { willReadFrequently: true });
+  pg.images = pg.images.filter((o) => {
+    if (!o.fill || w[0] < o.x || w[0] > o.x + o.w || w[1] < o.y || w[1] > o.y + o.h) return true;
+    const im = getImg(o.src); if (!im.complete || !im.naturalWidth) return true;
+    pc.clearRect(0, 0, 1, 1); pc.drawImage(im, -(w[0] - o.x) / o.w * im.naturalWidth, -(w[1] - o.y) / o.h * im.naturalHeight);
+    return pc.getImageData(0, 0, 1, 1).data[3] < 128;
+  });
   pg.images.unshift({ id: uid(), src: oc.toDataURL('image/png'), x: box[0] + x0 / k, y: box[1] + y0 / k, w: ow / k, h: oh / k, fill: true });
   renderBase(); renderLive(); scheduleSave();
 }
