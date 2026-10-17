@@ -142,6 +142,10 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 #stage{position:absolute;inset:0;touch-action:none}
 #stage canvas{position:absolute;inset:0;width:100%;height:100%}
 #live{touch-action:none}
+.magicbar{position:absolute;z-index:7;display:flex;align-items:center;gap:6px;flex-wrap:wrap;max-width:min(92%,560px);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 8px;box-shadow:0 10px 30px -14px var(--shadow,rgba(0,0,0,.35));font-size:13px}
+.magicbar span{color:var(--muted);padding:0 4px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.magicbar button{padding:6px 10px;border-radius:8px;background:var(--bg);font-weight:600;font-size:13px}
+.magicbar button[data-undo]{color:var(--accent);background:var(--accent-soft)}
 #stage.drop{outline:3px dashed var(--accent);outline-offset:-6px}
 .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));grid-auto-rows:128px;gap:10px;align-content:start;margin-top:12px;height:min(58vh,620px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .gal[hidden]{display:none}
@@ -1486,6 +1490,7 @@ function pressureOf(ev) {
 function pushRaw(ev) {
   const a = action, w = toWorld(local(ev)), pts = a.st.pts, n = pts.length;
   const p = pressureOf(ev);
+  if (a.magic) { a.rx.push(w[0]); a.ry.push(w[1]); a.rt.push(ev.timeStamp); }   // untouched samples + real timing for the recognizer
   a.lastP = p; a.lastT = ev.timeStamp; a.lastScr = local(ev); a.raw = w;
   if (a.straight) { a.end = [w[0], w[1]]; buildStraight(); return; }
   let x = w[0], y = w[1];
@@ -1516,7 +1521,7 @@ function armStraighten(pt) {
 }
 
 live.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
+  e.preventDefault(); if (magicBarEl) hideMagicBar();
   const pt = local(e); lpFired = false;
   if (e.pointerType === 'touch' && toolKind !== 'text' && toolKind !== 'select') {
     clearLP(); const cx = e.clientX, cy = e.clientY;
@@ -1546,7 +1551,7 @@ live.addEventListener('pointerdown', (e) => {
   if (toolKind === 'fountain' || toolKind === 'ball' || toolKind === 'hl' || toolKind === 'magic') {
     const st = makeStrokeTemplate(toolKind);
     if (toolKind === 'magic') magicHold();
-    action = { type: 'draw', magic: toolKind === 'magic', id: e.pointerId, pointerType: e.pointerType, st, stab: toolKind === 'magic' ? 2 : T[toolKind].stab || 0, lastP: e.pointerType === 'pen' ? (e.pressure || .35) : .5 };
+    action = { type: 'draw', magic: toolKind === 'magic', rx: [], ry: [], rt: [], id: e.pointerId, pointerType: e.pointerType, st, stab: toolKind === 'magic' ? 2 : T[toolKind].stab || 0, lastP: e.pointerType === 'pen' ? (e.pressure || .35) : .5 };
     if (toolKind === 'hl' && T.hl.straight) { action.straight = true; action.start = w; action.end = w; action.avgP = .5; buildStraight(); }
     else pushRaw(e);
     armStraighten(pt); queueLive(); return;
@@ -1645,7 +1650,7 @@ function endPointer(e) {
     if (e.type !== 'pointercancel' && a.st.pts.length) {
       if (!a.straight && a.raw) { const p = a.st.pts, n = p.length; if (Math.hypot(a.raw[0] - p[n - 3], a.raw[1] - p[n - 2]) > .3) p.push(+a.raw[0].toFixed(1), +a.raw[1].toFixed(1), p[n - 1]); }
       pushUndo(snap()); page().strokes.push(a.st); renderBase(); scheduleSave();
-      if (a.magic) magicQueue(page(), a.st);
+      if (a.magic) { magicRaw.set(a.st, { xs: a.rx, ys: a.ry, ts: a.rt }); magicQueue(page(), a.st); }
     } else if (a.magic) magicResume();
     a.pred = null; renderLive();
   } else if (a.type === 'shape') {
@@ -1711,8 +1716,26 @@ async function magicFlush() {
   try {
     const lines = await recognizeText(strokes), now = live(); if (!lines || !now.length || !cur.pages.includes(pg)) { if (lines === null) toast('Could not read that'); return; }
     const texts = await layoutMagicText(lines, strokes[0].color); if (!texts.length) { toast('Could not read that'); return; }
-    magicApply(pg, now, [], texts); toast('✨ ' + lines.map((l) => l.text).join(' ').slice(0, 40) + ' · Undo to go back');
+    magicApply(pg, now, [], texts); magicBar(pg, texts, lines);
   } catch (e) { toast("Couldn't read that · needs internet"); }
+}
+/* a small bar under the converted text: pick another reading if the first guess was off */
+let magicBarEl = null, magicBarT = 0;
+function hideMagicBar() { if (magicBarEl) { magicBarEl.remove(); magicBarEl = null; } clearTimeout(magicBarT); }
+function magicBar(pg, texts, lines) {
+  hideMagicBar(); if (!texts.length) return;
+  const t = texts[0], alts = (lines[0].alts || []).filter((x) => x.trim() && x !== t.text).slice(0, 3);
+  const el = magicBarEl = document.createElement('div'); el.className = 'magicbar';
+  el.innerHTML = `<span>✨ ${esc(lines.map((l) => l.text).join(' ').slice(0, 48))}</span>` + (texts.length === 1 ? alts.map((a, i) => `<button data-alt="${i}">${esc(a)}</button>`).join('') : '') + '<button data-undo>Keep my writing</button>';
+  el.onclick = (e) => {
+    if (e.target.closest('[data-undo]')) { doUndo(); hideMagicBar(); return; }
+    const b = e.target.closest('[data-alt]'); if (!b) return;
+    const txt = alts[+b.dataset.alt]; pushUndo({ pg, strokes: pg.strokes.slice(), images: pg.images.map((o) => ({ ...o })), texts: pg.texts.map((q) => ({ ...q })) });
+    t.text = txt; mctx.font = fontFor(t.size, t.font); t.w = Math.ceil(mctx.measureText(txt).width) + 30; renderBase(); renderLive(); scheduleSave(); hideMagicBar();
+  };
+  stage.appendChild(el); magicBarT = setTimeout(hideMagicBar, 9000);
+  const sc = view.s, x = view.ox + t.x * sc, y = view.oy + (pg === page() ? poy() : 0) + (t.y + t.size * 1.35) * sc;
+  el.style.left = clamp(x, 8, Math.max(8, W - el.offsetWidth - 8)) + 'px'; el.style.top = clamp(y, 70, H - el.offsetHeight - 12) + 'px';
 }
 /* --- shapes --- */
 function recognizeShape(st) {
@@ -1774,21 +1797,90 @@ function recognizeShape(st) {
 }
 /* --- handwriting --- */
 function magicLang() { const l = T.magic.lang; if (l !== 'auto') return l; const n = (navigator.language || 'en').slice(0, 2).toLowerCase(); return MAGIC_LANGS.some((x) => x[0] === n) ? n : 'en'; }
-async function recognizeText(strokes) {
-  const info = strokes.map((st) => ({ st, b: itemsBox([st], [], []) })).sort((a, b) => (a.b[1] + a.b[3]) - (b.b[1] + b.b[3]));
-  const lines = [];   // cluster by line
-  for (const it of info) {
-    const cy = (it.b[1] + it.b[3]) / 2, ln = lines.find((l) => cy > l.y0 - (l.y1 - l.y0) * .35 && cy < l.y1 + (l.y1 - l.y0) * .35);
-    if (ln) { ln.items.push(it); ln.y0 = Math.min(ln.y0, it.b[1]); ln.y1 = Math.max(ln.y1, it.b[3]); } else lines.push({ items: [it], y0: it.b[1], y1: it.b[3] });
+/* ---- ink preparation for handwriting recognition ----
+   ink = [{xs:[], ys:[], ts:[]}, ...] in writing order */
+const inkBox = (s) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (let i = 0; i < s.xs.length; i++) { const x = s.xs[i], y = s.ys[i]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } return [x0, y0, x1, y1]; };
+const inkPts = (ink) => ink.reduce((a, s) => a + s.xs.length, 0);
+function rdpIdx(xs, ys, eps) {   // Douglas-Peucker, returns kept indexes
+  const keep = new Uint8Array(xs.length); keep[0] = keep[xs.length - 1] = 1; const st = [[0, xs.length - 1]];
+  while (st.length) {
+    const [a, z] = st.pop(); if (z - a < 2) continue;
+    const dx = xs[z] - xs[a], dy = ys[z] - ys[a], l = Math.hypot(dx, dy) || 1; let md = 0, mi = -1;
+    for (let i = a + 1; i < z; i++) { const d = Math.abs((xs[i] - xs[a]) * dy - (ys[i] - ys[a]) * dx) / l; if (d > md) { md = d; mi = i; } }
+    if (md > eps && mi > 0) { keep[mi] = 1; st.push([a, mi], [mi, z]); }
   }
-  const order = new Map(strokes.map((s, i) => [s, i])), out = [], lang = magicLang();
-  for (const ln of lines.sort((a, b) => a.y0 - b.y0)) {
-    const sts = ln.items.map((i) => i.st).sort((a, b) => order.get(a) - order.get(b)), box = itemsBox(sts, [], []); let t = 0;
-    const ink = sts.map((st) => { const xs = [], ys = [], ts = []; for (let i = 0; i < st.pts.length; i += 3) { xs.push(Math.round(st.pts[i])); ys.push(Math.round(st.pts[i + 1])); ts.push(t); t += 12; } t += 250; return [xs, ys, ts]; });
-    const body = { app_version: .4, api_level: '537.36', device: 'Chrome', input_type: 0, options: 'enable_pre_space', requests: [{ writing_guide: { writing_area_width: Math.round(box[2] - box[0]) + 40, writing_area_height: Math.max(80, Math.round(box[3] - box[1]) + 40) }, ink, language: lang }] };
-    const r = await fetch(`https://inputtools.google.com/request?itc=${lang}-t-i0-handwrit&app=mobilesearch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const d = await r.json(); if (d[0] !== 'SUCCESS') return null;
-    const text = ((d[1] && d[1][0] && d[1][0][1] && d[1][0][1][0]) || '').trim(); if (text) out.push({ text, box });
+  const out = []; for (let i = 0; i < keep.length; i++) if (keep[i]) out.push(i); return out;
+}
+function thinInk(ink, eps = .9) {   // the recognizer chokes on thousands of samples: keep corners and loops, drop the redundant ones
+  return ink.map((s) => { let ix = rdpIdx(s.xs, s.ys, eps); if (ix.length < 2) ix = [0, s.xs.length - 1]; return { xs: ix.map((i) => s.xs[i]), ys: ix.map((i) => s.ys[i]), ts: ix.map((i) => s.ts[i]) }; });
+}
+function chunkInk(ink, pmax = 420, smax = 45) {   // long writing is cut at the widest gaps (between words) so each request stays small
+  if (inkPts(ink) <= pmax && ink.length <= smax) return [ink];
+  if (ink.length < 2) return [ink];
+  const items = ink.map((s, k) => ({ s, k, b: inkBox(s) })).sort((a, b) => a.b[0] - b.b[0]), tot = inkPts(ink);
+  let best = -1, bi = 0, right = -Infinity, acc = 0;
+  for (let i = 0; i < items.length - 1; i++) {
+    right = Math.max(right, items[i].b[2]); acc += items[i].s.xs.length;
+    const gap = items[i + 1].b[0] - right, bal = Math.max(.05, 1 - Math.abs(acc / tot - .5) * 1.4), sc = (Math.max(gap, 0) + .1) * bal;
+    if (sc > best) { best = sc; bi = i; }
+  }
+  const byK = (a, b) => a.k - b.k, L = items.slice(0, bi + 1).sort(byK).map((o) => o.s), R = items.slice(bi + 1).sort(byK).map((o) => o.s);
+  return chunkInk(L, pmax, smax).concat(chunkInk(R, pmax, smax));
+}
+function clusterLines(ink) {   // strokes arrive in writing order; a stroke joins the line whose height it shares
+  if (!ink.length) return [];
+  const boxes = ink.map(inkBox), hs = boxes.map((b) => b[3] - b[1]).sort((a, b) => a - b), med = Math.max(10, hs[Math.floor(hs.length / 2)]);
+  const lines = [], small = [], thin = .35 * med;   // dots, accents and dashes are attached after the main letters are placed
+  const big = ink.map((s, i) => i).filter((i) => (boxes[i][3] - boxes[i][1]) >= thin);
+  const main = big.length ? big : ink.map((s, i) => i);
+  for (let i = 0; i < ink.length; i++) if (!main.includes(i)) small.push(i);
+  for (const i of main) {
+    const b = boxes[i], cy = (b[1] + b[3]) / 2; let best = null, bd = Infinity;
+    for (const l of lines) { const d = Math.abs(cy - l.cy); if (d < bd) { bd = d; best = l; } }
+    if (best && bd < Math.max(1.05 * med, .55 * (best.y1 - best.y0))) { best.items.push(i); best.ys.push(cy); best.y0 = Math.min(best.y0, b[1]); best.y1 = Math.max(best.y1, b[3]); const m = best.ys.slice().sort((p, q) => p - q); best.cy = m[Math.floor(m.length / 2)]; }
+    else lines.push({ items: [i], ys: [cy], cy, y0: b[1], y1: b[3] });
+  }
+  for (const i of small) {
+    const b = boxes[i], cy = (b[1] + b[3]) / 2; let best = null, bd = Infinity;
+    for (const l of lines) { const d = cy < l.y0 ? l.y0 - cy : cy > l.y1 ? cy - l.y1 : 0; if (d < bd) { bd = d; best = l; } }
+    if (best && bd < 1.2 * med) { best.items.push(i); best.y0 = Math.min(best.y0, b[1]); best.y1 = Math.max(best.y1, b[3]); }
+    else lines.push({ items: [i], ys: [cy], cy, y0: b[1], y1: b[3] });
+  }
+  // merge fragments of one line: tall letters and short letters can start separate lines whose vertical ranges overlap
+  let merged = true;
+  while (merged) {
+    merged = false;
+    for (let i = 0; i < lines.length && !merged; i++) for (let j = i + 1; j < lines.length && !merged; j++) {
+      const A = lines[i], B = lines[j], ov = Math.min(A.y1, B.y1) - Math.max(A.y0, B.y0), hmin = Math.min(A.y1 - A.y0, B.y1 - B.y0);
+      if (ov > .5 * hmin) { A.items.push(...B.items); A.y0 = Math.min(A.y0, B.y0); A.y1 = Math.max(A.y1, B.y1); A.cy = (A.cy + B.cy) / 2; lines.splice(j, 1); merged = true; }
+    }
+  }
+  return lines.sort((a, b) => a.cy - b.cy).map((l) => l.items.slice().sort((p, q) => p - q).map((i) => ink[i]));
+}
+
+const magicRaw = new WeakMap();
+async function recognizeText(strokes) {
+  let t0 = Infinity;
+  const rawInk = strokes.map((st) => {
+    const r = magicRaw.get(st);
+    if (r && r.xs.length > 1) { t0 = Math.min(t0, r.ts[0]); return { xs: r.xs, ys: r.ys, ts: r.ts }; }
+    const xs = [], ys = [], ts = []; for (let i = 0; i < st.pts.length; i += 3) { xs.push(st.pts[i]); ys.push(st.pts[i + 1]); ts.push(i * 4); } return { xs, ys, ts };
+  });
+  if (t0 === Infinity) t0 = 0;
+  const ink = rawInk.map((r) => ({ xs: r.xs, ys: r.ys, ts: r.ts.map((t) => t - t0) }));
+  const hs = ink.map((q) => { const b = inkBox(q); return b[3] - b[1]; }).sort((x, y) => x - y), med = hs[Math.floor(hs.length / 2)] || 20, eps = Math.min(3, Math.max(.5, med * .04));
+  const lang = magicLang(), out = [];
+  for (const line of clusterLines(ink)) {
+    const chunks = chunkInk(thinInk(line, eps));
+    const results = await Promise.all(chunks.map(async (ch) => {
+      const bb = ch.map(inkBox), x0 = Math.min(...bb.map((b) => b[0])), y0 = Math.min(...bb.map((b) => b[1])), x1 = Math.max(...bb.map((b) => b[2])), y1 = Math.max(...bb.map((b) => b[3])), tz = Math.min(...ch.map((q) => q.ts[0]));
+      const body = { app_version: .4, api_level: '537.36', device: 'Chrome', input_type: 0, options: 'enable_pre_space', requests: [{ writing_guide: { writing_area_width: Math.round(x1 - x0) + 40, writing_area_height: Math.max(80, Math.round(y1 - y0) + 40) }, ink: ch.map((q) => [q.xs.map(Math.round), q.ys.map(Math.round), q.ts.map((t) => Math.round(t - tz))]), language: lang }] };
+      const r = await fetch(`https://inputtools.google.com/request?itc=${lang}-t-i0-handwrit&app=mobilesearch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json(); return d[0] === 'SUCCESS' && d[1] && d[1][0] ? d[1][0][1] || [] : [];
+    }));
+    const text = results.map((c) => (c[0] || '').trim()).filter(Boolean).join(' ');
+    const lb = line.map(inkBox), box = [Math.min(...lb.map((b) => b[0])), Math.min(...lb.map((b) => b[1])), Math.max(...lb.map((b) => b[2])), Math.max(...lb.map((b) => b[3]))];
+    if (text) out.push({ text, box, alts: results.length === 1 ? results[0].slice(1, 5) : [] });
   }
   return out.length ? out : null;
 }
