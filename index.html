@@ -792,6 +792,8 @@ function renderBase() {
     maybeAddPage();
     const maxOy = 110, total = ((cur.pages.length * STRIDE) - GAP) * s;
     view.oy = clamp(view.oy, Math.min(maxOy, H - 90 - total), maxOy);
+    const pw = PAGE.w * s;   // vertical-only track: centred when the page fits, bounded to the page edges when zoomed in
+    view.ox = pw <= W ? (W - pw) / 2 : clamp(view.ox, W - pw - 24, 24);
   }
   const { ox, oy } = view;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
