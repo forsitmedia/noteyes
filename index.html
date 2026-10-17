@@ -1333,7 +1333,32 @@ function eraseAt(w, prev) {
     if (run.length) pieces.push({ pts: run, ts: runStart === 0, te: true });
     for (const pc of pieces) if (pc.pts.length >= 6) out.push({ ...st, pts: pc.pts.map((v) => +v.toFixed(1)), ts: st.ts !== false && pc.ts, te: st.te !== false && pc.te });
   }
+  const keep = pg.images.filter((o) => !(o.fill && fillTouched(o, w, prev, r)));
+  if (keep.length !== pg.images.length) { pg.images = keep; changed = true; }
   if (changed) { pg.strokes = out; action.changed = true; queueBase(); }
+}
+/* bucket fills are images: the eraser removes one when it passes over a painted pixel */
+const alphaCache = new Map();
+function fillAlpha(o) {
+  let m = alphaCache.get(o.src); if (m) return m;
+  const im = getImg(o.src); if (!im.complete || !im.naturalWidth) return null;
+  const cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+  const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(im, 0, 0);
+  const d = c.getImageData(0, 0, cv.width, cv.height).data, a = new Uint8Array(cv.width * cv.height);
+  for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3];
+  m = { a, w: cv.width, h: cv.height }; alphaCache.set(o.src, m); return m;
+}
+function fillTouched(o, w, prev, r) {
+  const minx = Math.min(w[0], prev[0]) - r, maxx = Math.max(w[0], prev[0]) + r, miny = Math.min(w[1], prev[1]) - r, maxy = Math.max(w[1], prev[1]) + r;
+  if (maxx < o.x || minx > o.x + o.w || maxy < o.y || miny > o.y + o.h) return false;
+  const m = fillAlpha(o); if (!m) return false;
+  const hit = (x, y) => { const px = Math.floor((x - o.x) / o.w * m.w), py = Math.floor((y - o.y) / o.h * m.h); return px >= 0 && py >= 0 && px < m.w && py < m.h && m.a[py * m.w + px] > 100; };
+  const n = Math.max(1, Math.ceil(Math.hypot(w[0] - prev[0], w[1] - prev[1]) / Math.max(2, r / 2))), rr = r * .6;
+  for (let i = 0; i <= n; i++) {
+    const x = prev[0] + (w[0] - prev[0]) * i / n, y = prev[1] + (w[1] - prev[1]) * i / n;
+    if (hit(x, y) || hit(x + rr, y) || hit(x - rr, y) || hit(x, y + rr) || hit(x, y - rr)) return true;
+  }
+  return false;
 }
 
 /* drawing */
