@@ -248,7 +248,7 @@ const DEFAULTS = {
   shape: { kind: 'rect', size: 1, color: '#111418' },
   bucket: { color: '#3b78e7' }
 };
-const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas', image: 'Image', bucket: 'Fill bucket', shape: 'Shapes' };
+const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas', select: 'Select & move', image: 'Image', bucket: 'Fill bucket', shape: 'Shapes' };
 
 const I = {
   back: '<path d="M15 5l-7 7 7 7"/>',
@@ -270,6 +270,7 @@ const I = {
   bucket: '<path d="M5 12l7-7 7 7-6.5 6.5a2 2 0 0 1-2.8 0z"/><path d="M12 5L9.5 2.5M20 15c1.2 1.6 1.5 2.4 1.5 3.2a1.5 1.5 0 0 1-3 0c0-.8.3-1.6 1.5-3.2z"/>',
   image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  select: '<path d="M6 3.5l12.5 6.2-5.3 1.7-1.9 5.3z"/><path d="M13.4 12.8l4.3 4.3"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   notebook: '<path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M6 3v18M10 8h5"/>',
   board: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21l4-4 4 4"/>',
@@ -594,7 +595,7 @@ let W = 0, H = 0, dpr = 1;
 $('#paperbtn').innerHTML = ic('paper'); $('#fit').innerHTML = ic('fit'); $('#emore').innerHTML = ic('more');
 
 function buildRail() {
-  const tools = ['fountain', 'ball', 'hl', 'eraser', 'lasso', 'shape', 'text', 'bucket', 'hand'];
+  const tools = ['fountain', 'ball', 'hl', 'eraser', 'select', 'lasso', 'shape', 'text', 'bucket', 'hand'];
   const ct = colorTool(), cc = ct ? T[ct].color : null;
   $('#rail').innerHTML =
     tools.map((k) => `<button class="ib" data-t="${k}" aria-label="${TOOL_NAMES[k]}" title="${TOOL_NAMES[k]}${T[k] ? ' · tap again for settings' : ''}" aria-pressed="${toolKind === k}">${ic(k)}${T[k] && T[k].color ? `<i class="dot" style="--c:${T[k].color}"></i>` : ''}</button>`).join('') +
@@ -631,7 +632,7 @@ let prevDrawTool = 'fountain', afterInsert = false;
 function setTool(k) {
   if (['fountain', 'ball', 'hl'].includes(k)) prevDrawTool = k; afterInsert = false;
   if (k !== 'text') commitText();
-  if (k !== 'lasso') clearSel();
+  if (k !== 'lasso' && k !== 'select') clearSel();
   toolKind = k; prefs.kind = k; savePrefs(); buildRail(); renderLive();
 }
 function setPencilOnly(v) { pencilOnly = v; prefs.pencilOnly = v; savePrefs(); $('#pencilonly').setAttribute('aria-pressed', String(v)); }
@@ -1235,14 +1236,15 @@ function lassoSelect(P) {
   const texts = pg.texts.filter((t) => pointInPoly(t.x + Math.min(t.w, 60) / 2, t.y + t.size / 2, P));
   makeSel(strokes, images, texts);
 }
-function tapSelect(w) {
-  const pg = page(), r = 10 / view.s;
-  for (let i = pg.images.length - 1; i >= 0; i--) { const o = pg.images[i]; if (o.top && !o.fill && w[0] >= o.x && w[0] <= o.x + o.w && w[1] >= o.y && w[1] <= o.y + o.h) return makeSel([], [o], []); }
-  for (let i = pg.texts.length - 1; i >= 0; i--) { const t = pg.texts[i]; if (w[0] >= t.x && w[0] <= t.x + t.w && w[1] >= t.y && w[1] <= t.y + textH(t)) return makeSel([], [], [t]); }
-  for (let i = pg.strokes.length - 1; i >= 0; i--) { const st = pg.strokes[i], rr = r + st.w / 2; for (let k = 0; k < st.pts.length; k += 3) if (Math.hypot(st.pts[k] - w[0], st.pts[k + 1] - w[1]) < rr) return makeSel([st], [], []); }
-  for (let i = pg.images.length - 1; i >= 0; i--) { const o = pg.images[i]; if (w[0] >= o.x && w[0] <= o.x + o.w && w[1] >= o.y && w[1] <= o.y + o.h) return makeSel([], [o], []); }
-  makeSel([], [], []);
+function hitAt(w, r, noFill) {   // what is under this point: images in front, text, ink, then images behind
+  const pg = page(), inImg = (o) => w[0] >= o.x && w[0] <= o.x + o.w && w[1] >= o.y && w[1] <= o.y + o.h;
+  for (let i = pg.images.length - 1; i >= 0; i--) { const o = pg.images[i]; if (o.top && !o.fill && inImg(o)) return [[], [o], []]; }
+  for (let i = pg.texts.length - 1; i >= 0; i--) { const t = pg.texts[i]; if (w[0] >= t.x && w[0] <= t.x + t.w && w[1] >= t.y && w[1] <= t.y + textH(t)) return [[], [], [t]]; }
+  for (let i = pg.strokes.length - 1; i >= 0; i--) { const st = pg.strokes[i], rr = r + st.w / 2; for (let k = 0; k < st.pts.length; k += 3) if (Math.hypot(st.pts[k] - w[0], st.pts[k + 1] - w[1]) < rr) return [[st], [], []]; }
+  for (let i = pg.images.length - 1; i >= 0; i--) { const o = pg.images[i]; if (!(noFill && o.fill) && inImg(o)) return [[], [o], []]; }
+  return null;
 }
+function tapSelect(w) { const h = hitAt(w, 10 / view.s, false) || [[], [], []]; makeSel(...h); }
 
 /* ================= text ================= */
 function startText(w) {
@@ -1455,7 +1457,7 @@ function armStraighten(pt) {
 live.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   const pt = local(e); lpFired = false;
-  if (e.pointerType === 'touch' && toolKind !== 'text') {
+  if (e.pointerType === 'touch' && toolKind !== 'text' && toolKind !== 'select') {
     clearLP(); const cx = e.clientX, cy = e.clientY;
     lp = { id: e.pointerId, pt, t: setTimeout(() => {
       if (!lp || touches.size > 1 || !cur) return;
@@ -1468,7 +1470,7 @@ live.addEventListener('pointerdown', (e) => {
     if (!touches.size) tapInfo = { t0: performance.now(), max: 0, moved: 0, pt };
     touches.set(e.pointerId, pt); tapInfo && (tapInfo.max = Math.max(tapInfo.max, touches.size));
     try { live.setPointerCapture(e.pointerId); } catch (_) {}
-    if (pencilOnly || toolKind === 'hand' || tapTool() || touches.size > 1) {
+    if ((pencilOnly && toolKind !== 'select') || toolKind === 'hand' || tapTool() || touches.size > 1) {
       if (action && action.pointerType === 'touch') cancelAction();
       startGesture(); return;
     }
@@ -1491,6 +1493,17 @@ live.addEventListener('pointerdown', (e) => {
   if (toolKind === 'eraser') {
     action = { type: 'erase', id: e.pointerId, pointerType: e.pointerType, before: snap(), changed: false, prev: w };
     eraserAt = w; eraseAt(w, w); queueLive(); return;
+  }
+  if (toolKind === 'select') {   // tap an item to select it, drag it to move, drag the corner handle to resize; empty space pans
+    if (sel) {
+      const b = selScreenBox(), pad = 8 / view.s;
+      if (Math.hypot(w[0] - (b[2] + pad), w[1] - (b[3] + pad)) < 28 / view.s) { action = { type: 'scale', id: e.pointerId, pointerType: e.pointerType, before: snap(), start: w }; return; }
+      if (w[0] >= b[0] - pad && w[0] <= b[2] + pad && w[1] >= b[1] - pad && w[1] <= b[3] + pad) { action = { type: 'movesel', id: e.pointerId, pointerType: e.pointerType, before: snap(), start: w }; return; }
+    }
+    const h = hitAt(w, 6 / view.s, true);
+    if (h) { makeSel(...h); action = { type: 'movesel', id: e.pointerId, pointerType: e.pointerType, before: snap(), start: w }; }
+    else { clearSel(); action = { type: 'pan', id: e.pointerId, last: pt, pointerType: e.pointerType }; }
+    return;
   }
   if (toolKind === 'lasso') {
     if (sel) {
@@ -1787,7 +1800,7 @@ function insertImage({ src, w, h }) {
   pushUndo(snap());
   const o = { id: uid(), src, x: cx - ww / 2, y: cy - hh / 2, w: ww, h: hh };
   page().images.push(o); scheduleSave();
-  toolKind = 'lasso'; afterInsert = true; buildRail(); makeSel([], [o], []);
+  toolKind = 'select'; afterInsert = true; buildRail(); makeSel([], [o], []);
 }
 
 /* ================= examples on first run ================= */
