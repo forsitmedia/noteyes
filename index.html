@@ -223,6 +223,7 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 'use strict';
 /* ================= constants ================= */
 const PAGE = { w: 1000, h: 1414 };
+const GAP = 36, STRIDE = PAGE.h + GAP;   // notebook pages are stacked vertically, scrolled like a book
 const PAPER = '#fbfbf8';
 const SPINES = ['#2c56c9', '#1d8a58', '#c0532f', '#7c4dc4', '#3a4352', '#c99a1d'];
 const PAPERS = [['blank', 'Blank'], ['lines', 'Lines'], ['grid', 'Grid'], ['dots', 'Dots']];
@@ -234,7 +235,7 @@ const DEFAULTS = {
   eraser: { mode: 'stroke', size: 2 },
   text: { size: 28, color: '#111418' }
 };
-const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas' };
+const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas', image: 'Image' };
 
 const I = {
   back: '<path d="M15 5l-7 7 7 7"/>',
@@ -577,7 +578,7 @@ function buildRail() {
   const ct = colorTool(), cc = ct ? T[ct].color : null;
   $('#rail').innerHTML =
     tools.map((k) => `<button class="ib" data-t="${k}" aria-label="${TOOL_NAMES[k]}" title="${TOOL_NAMES[k]}${T[k] ? ' · tap again for settings' : ''}" aria-pressed="${toolKind === k}">${ic(k)}${T[k] && T[k].color ? `<i class="dot" style="--c:${T[k].color}"></i>` : ''}</button>`).join('') +
-    `<button class="ib" data-img aria-label="Insert image" title="Insert image">${ic('image')}</button><hr>` +
+    `<button class="ib" data-t="image" aria-label="Image" title="Image · then tap where it goes" aria-pressed="${toolKind === 'image'}">${ic('image')}</button><hr>` +
     prefs.palette.slice(0, 6).map((c) => `<button class="sw" data-c="${c}" style="--c:${c}" aria-label="Color ${c}" aria-pressed="${c === cc}"><span></span></button>`).join('');
 }
 $('#rail').addEventListener('click', (e) => {
@@ -586,10 +587,10 @@ $('#rail').addEventListener('click', (e) => {
     const k = t.dataset.t;
     if (k === toolKind && T[k]) { openToolSettings(k, t); return; }
     setTool(k);
+    if (k === 'image') toast('Tap on the page where the image should go');
     if (T[k] && !prefs.hintShown) { prefs.hintShown = true; savePrefs(); toast('Tap the tool again to change its settings'); }
   }
   if (c) { const ct = colorTool() || (setTool('fountain'), 'fountain'); T[ct].color = c.dataset.c; savePrefs(); applyColorToEditing(); buildRail(); }
-  if (e.target.closest('[data-img]')) pickImage(false);
 });
 function setTool(k) {
   if (k !== 'text') commitText();
@@ -735,11 +736,11 @@ function resize() {
   if (cur) { renderBase(); renderLive(); }
 }
 new ResizeObserver(() => { if (!$('#editor').hidden) resize(); }).observe(stage);
-function fitView() {
+function fitView(i = pageIdx) {
   if (cur.kind === 'notebook') {
-    const top = 70, padX = W < 640 ? 16 : 90, bottom = W < 640 ? 86 : 24;
-    const s = Math.min((W - padX * 2) / PAGE.w, (H - top - bottom) / PAGE.h);
-    view = { s, ox: (W - PAGE.w * s) / 2, oy: top + (H - top - bottom - PAGE.h * s) / 2 };
+    const top = 70, padX = W < 640 ? 16 : 90;
+    const s = Math.min((W - padX * 2) / PAGE.w, 1.3);
+    view = { s, ox: (W - PAGE.w * s) / 2, oy: top - i * STRIDE * s };
   } else {
     const b = bbox(page());
     if (!b) { view = { s: 1, ox: W / 2 - 400, oy: H / 2 - 300 }; return; }
@@ -764,29 +765,61 @@ function skipSet() {
   if (editing && editing.t) s.add(editing.t);
   return s.size ? s : null;
 }
+const poy = () => cur.kind === 'notebook' ? pageIdx * STRIDE * view.s : 0;   // screen offset of the active page
+function visPage() { return clamp(Math.floor(((H / 2 - view.oy) / view.s) / STRIDE), 0, cur.pages.length - 1); }
+function updatePageNo() {
+  if (cur.kind !== 'notebook') return;
+  const v = visPage(), t = `${v + 1} / ${cur.pages.length}`;
+  if ($('#pageno').textContent !== t) $('#pageno').textContent = t;
+  $('#prev').disabled = v === 0; $('#next').disabled = v === cur.pages.length - 1;
+}
+/* smart paging: when the last page has writing on it and you scroll or write toward its end, a fresh page appears */
+function maybeAddPage() {
+  if (cur.kind !== 'notebook') return;
+  const n = cur.pages.length, last = cur.pages[n - 1], b = bbox(last);
+  if (!b) return;
+  const bottom = ((H - view.oy) / view.s) - (n - 1) * STRIDE;
+  if (b[3] > PAGE.h * .68 || bottom > PAGE.h * .55) { cur.pages.push(blankPage()); scheduleSave(); }
+}
 function renderBase() {
-  const c = bctx, { s, ox, oy } = view, nb = cur.kind === 'notebook';
+  const c = bctx, { s } = view, nb = cur.kind === 'notebook';
+  if (nb) {
+    maybeAddPage();
+    const maxOy = 110, total = ((cur.pages.length * STRIDE) - GAP) * s;
+    view.oy = clamp(view.oy, Math.min(maxOy, H - 90 - total), maxOy);
+  }
+  const { ox, oy } = view;
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.fillStyle = deskCache || (deskCache = deskColor()); c.fillRect(0, 0, W, H);
-  let x0 = -ox / s, y0 = -oy / s, x1 = (W - ox) / s, y1 = (H - oy) / s;
-  c.save();
-  if (nb) {
-    c.save(); c.shadowColor = 'rgba(15,25,45,.22)'; c.shadowBlur = 24; c.shadowOffsetY = 6;
-    c.fillStyle = PAPER; c.fillRect(ox, oy, PAGE.w * s, PAGE.h * s); c.restore();
-    c.beginPath(); c.rect(ox, oy, PAGE.w * s, PAGE.h * s); c.clip();
-    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(PAGE.w, x1); y1 = Math.min(PAGE.h, y1);
-  } else { c.fillStyle = PAPER; c.fillRect(0, 0, W, H); }
-  c.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
-  drawPattern(c, cur.paper, x0, y0, x1, y1, s, nb);
-  drawContent(c, page(), skipSet());
-  c.restore();
+  if (!nb) {
+    c.save(); c.fillStyle = PAPER; c.fillRect(0, 0, W, H);
+    c.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
+    drawPattern(c, cur.paper, -ox / s, -oy / s, (W - ox) / s, (H - oy) / s, s, false);
+    drawContent(c, page(), skipSet());
+    c.restore(); return;
+  }
+  const skip = skipSet();
+  for (let i = 0; i < cur.pages.length; i++) {
+    const top = oy + i * STRIDE * s;
+    if (top > H || top + PAGE.h * s < 0) continue;
+    c.save();
+    c.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * top);
+    c.save(); c.shadowColor = 'rgba(15,25,45,.22)'; c.shadowBlur = 24 * dpr; c.shadowOffsetY = 6 * dpr;
+    c.fillStyle = PAPER; c.fillRect(0, 0, PAGE.w, PAGE.h); c.restore();
+    c.beginPath(); c.rect(0, 0, PAGE.w, PAGE.h); c.clip();
+    const x0 = Math.max(0, -ox / s), y0 = Math.max(0, -top / s), x1 = Math.min(PAGE.w, (W - ox) / s), y1 = Math.min(PAGE.h, (H - top) / s);
+    drawPattern(c, cur.paper, x0, y0, x1, y1, s, true);
+    drawContent(c, cur.pages[i], i === pageIdx ? skip : null);
+    c.restore();
+  }
+  updatePageNo();
 }
 let action = null, eraserAt = null, lassoPts = null;
 function renderLive() {
   const c = lctx; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, live.width, live.height);
   if (!cur) return;
   const { s, ox, oy } = view;
-  c.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
+  c.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * (oy + poy()));
   if (cur.kind === 'notebook') { c.save(); c.beginPath(); c.rect(0, 0, PAGE.w, PAGE.h); c.clip(); }
   if (sel) {
     const [x0, y0] = sel.box;
@@ -794,11 +827,11 @@ function renderLive() {
     drawContent(c, { images: sel.images, strokes: sel.strokes, texts: sel.texts });
     c.restore();
   }
-  if (cur.kind === 'notebook') c.restore();
   if (action && action.type === 'draw') {
     drawStroke(c, action.st, true);
     if (action.pred && action.pred.length) drawStroke(c, { ...action.st, ts: false, pts: action.st.pts.slice(-3).concat(action.pred) }, true);
   }
+  if (cur.kind === 'notebook') c.restore();
   if (eraserAt) { c.lineWidth = 1.5 / s; c.strokeStyle = 'rgba(40,50,70,.6)'; c.fillStyle = 'rgba(255,255,255,.4)'; c.beginPath(); c.arc(eraserAt[0], eraserAt[1], eraserR(), 0, Math.PI * 2); c.fill(); c.stroke(); }
   if (lassoPts && lassoPts.length > 2) {
     const closed = action && action.type === 'lasso' ? action.closed : null;
@@ -847,10 +880,7 @@ $('#title').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target
 
 function updateChrome() {
   $('#undo').disabled = !undoStack.length; $('#redo').disabled = !redoStack.length;
-  if (cur.kind === 'notebook') {
-    $('#pageno').textContent = `${pageIdx + 1} / ${cur.pages.length}`;
-    $('#prev').disabled = pageIdx === 0; $('#next').disabled = pageIdx === cur.pages.length - 1;
-  }
+  if (cur.kind === 'notebook') updatePageNo();
   const ctx = $('#ctx');
   if (sel) {
     ctx.innerHTML = `${sel.strokes.length || sel.texts.length ? '<button data-sa="color">Color</button>' : ''}<button data-sa="dup">Duplicate</button>${sel.images.length ? '<button data-sa="front">To front</button>' : ''}<button data-sa="del" class="del">Delete</button><button data-sa="done">Done</button>`;
@@ -860,12 +890,14 @@ function updateChrome() {
 function gotoPage(i) {
   commitText(); clearSel();
   pageIdx = clamp(i, 0, cur.pages.length - 1);
-  view.user = false; fitView(); renderBase(); renderLive(); updateChrome();
+  const keepS = view.user ? view.s : null;
+  view.user = false; fitView(); if (keepS) { view.s = keepS; view.oy = 70 - pageIdx * STRIDE * keepS; view.user = true; }
+  renderBase(); renderLive(); updateChrome();
 }
-$('#prev').onclick = () => gotoPage(pageIdx - 1);
-$('#next').onclick = () => gotoPage(pageIdx + 1);
-$('#addpage').onclick = () => { cur.pages.splice(pageIdx + 1, 0, blankPage()); undoStack = []; redoStack = []; gotoPage(pageIdx + 1); scheduleSave(); toast(`Page ${pageIdx + 1} added`); };
-$('#fit').onclick = () => { view.user = false; fitView(); renderBase(); renderLive(); persistView(); };
+$('#prev').onclick = () => gotoPage(visPage() - 1);
+$('#next').onclick = () => gotoPage(visPage() + 1);
+$('#addpage').onclick = () => { const at = visPage(); cur.pages.splice(at + 1, 0, blankPage()); undoStack = []; redoStack = []; gotoPage(at + 1); scheduleSave(); toast(`Page ${at + 2} added`); };
+$('#fit').onclick = () => { view.user = false; fitView(cur.kind === 'notebook' ? visPage() : pageIdx); renderBase(); renderLive(); persistView(); };
 $('#paperbtn').onclick = (e) => {
   popover(e.currentTarget, PAPERS.map(([k, l]) => `<button class="row" data-a="${k}"><span style="width:14px">${k === cur.paper ? '✓' : ''}</span><span>${l}</span></button>`).join(''),
     (a) => { cur.paper = a; closeOverlay(); renderBase(); scheduleSave(); });
@@ -1030,7 +1062,7 @@ function startText(w) {
 function positionEditor() {
   if (!editing) return;
   const t = editing.t, s = view.s;
-  Object.assign(ted.style, { left: (view.ox + t.x * s) + 'px', top: (view.oy + t.y * s) + 'px', width: t.w + 'px', fontSize: t.size + 'px', color: t.color, transform: `scale(${s})` });
+  Object.assign(ted.style, { left: (view.ox + t.x * s) + 'px', top: (view.oy + poy() + t.y * s) + 'px', width: t.w + 'px', fontSize: t.size + 'px', color: t.color, transform: `scale(${s})` });
   ted.style.height = 'auto'; ted.style.height = Math.max(t.size * 1.3, ted.scrollHeight) + 'px';
 }
 ted.addEventListener('input', positionEditor);
@@ -1050,7 +1082,14 @@ function commitText() {
 /* ================= input ================= */
 const touches = new Map(); let gesture = null, tapInfo = null, penSeen = false;
 const local = (e) => { const r = stage.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-const toWorld = ([x, y]) => [(x - view.ox) / view.s, (y - view.oy) / view.s];
+const toWorld = ([x, y]) => [(x - view.ox) / view.s, (y - view.oy - poy()) / view.s];
+/* in a notebook the page under the pointer becomes the active page */
+function activatePageAt(pt) {
+  if (cur.kind !== 'notebook') return;
+  const i = clamp(Math.floor(((pt[1] - view.oy) / view.s + GAP / 2) / STRIDE), 0, cur.pages.length - 1);
+  if (i === pageIdx) return;
+  commitText(); clearSel(); pageIdx = i; renderBase(); renderLive();
+}
 const eraserR = () => (4 + T.eraser.size * 6) / view.s;
 /* stop Safari's loupe, double-tap zoom and text selection while writing */
 ['touchstart', 'touchmove'].forEach((ev) => stage.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
@@ -1173,18 +1212,20 @@ live.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'pen' && !penSeen) { penSeen = true; if (!prefs.touched && !pencilOnly) { setPencilOnly(true); toast('Pencil detected · fingers now move and zoom the page'); } }
   if (e.pointerType === 'touch') {
     if (action && action.pointerType === 'pen') return;                     // palm rejection
-    if (!touches.size) tapInfo = { t0: performance.now(), max: 0, moved: 0 };
+    if (!touches.size) tapInfo = { t0: performance.now(), max: 0, moved: 0, pt };
     touches.set(e.pointerId, pt); tapInfo && (tapInfo.max = Math.max(tapInfo.max, touches.size));
     try { live.setPointerCapture(e.pointerId); } catch (_) {}
-    if (pencilOnly || toolKind === 'hand' || touches.size > 1) {
+    if (pencilOnly || toolKind === 'hand' || toolKind === 'image' || touches.size > 1) {
       if (action && action.pointerType === 'touch') cancelAction();
       startGesture(); return;
     }
   } else { try { live.setPointerCapture(e.pointerId); } catch (_) {} }
   if (action) return;
   if (e.pointerType === 'pen' && gesture) { touches.clear(); gesture = null; }   // pen wins over a resting palm
+  activatePageAt(pt);
   const w = toWorld(pt);
   if (toolKind !== 'text' && editing) commitText();
+  if (toolKind === 'image') { action = { type: 'imgtap', id: e.pointerId, pointerType: e.pointerType, startScr: pt, moved: 0 }; return; }
   if (toolKind === 'hand') { action = { type: 'pan', id: e.pointerId, last: pt, pointerType: e.pointerType }; return; }
   if (toolKind === 'fountain' || toolKind === 'ball' || toolKind === 'hl') {
     const st = makeStrokeTemplate(toolKind);
@@ -1217,6 +1258,7 @@ live.addEventListener('pointermove', (e) => {
   if (!action || e.pointerId !== action.id) return;
   const pt = local(e), w = toWorld(pt);
   const a = action;
+  if (a.type === 'imgtap') a.moved = Math.max(a.moved, Math.hypot(pt[0] - a.startScr[0], pt[1] - a.startScr[1]));
   if (a.type === 'draw') {
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     for (const ev of (evs.length ? evs : [e])) pushRaw(ev);
@@ -1257,6 +1299,7 @@ function endPointer(e) {
       else {
         gesture = null; persistView();
         if (tapInfo && performance.now() - tapInfo.t0 < 320 && tapInfo.moved < 14 && tapInfo.max >= 2) { tapInfo.max === 2 ? (doUndo(), toast('Undo')) : (doRedo(), toast('Redo')); }
+        else if (toolKind === 'image' && tapInfo && tapInfo.max === 1 && performance.now() - tapInfo.t0 < 500 && tapInfo.moved < 12) placeImageAt(tapInfo.pt);
         tapInfo = null;
       }
       return;
@@ -1278,6 +1321,7 @@ function endPointer(e) {
     else if (a.closed) lassoSelect(a.closed);
     else { renderLive(); toast('Close the loop to select'); }
   } else if (a.type === 'movesel' || a.type === 'scale') { bakeSel(a.before); updateChrome(); }
+  else if (a.type === 'imgtap') { if (e.type !== 'pointercancel' && a.moved < 10) placeImageAt(a.startScr); }
   else if (a.type === 'text' && e.type !== 'pointercancel') { commitText(); startText(a.w); }
 }
 live.addEventListener('pointerup', endPointer);
@@ -1293,7 +1337,9 @@ live.addEventListener('wheel', (e) => {
 
 /* ================= images ================= */
 let pendingNewFromPhoto = false;
-function pickImage(asNew) { pendingNewFromPhoto = asNew; const f = $('#file'); f.value = ''; f.click(); }
+let pendingPlace = null;
+function placeImageAt(pt) { activatePageAt(pt); pendingPlace = { pi: pageIdx, w: toWorld(pt) }; pickImage(false, true); }
+function pickImage(asNew, keepPlace) { if (!keepPlace) pendingPlace = null; pendingNewFromPhoto = asNew; const f = $('#file'); f.value = ''; f.click(); }
 $('#file').addEventListener('change', () => {
   const file = $('#file').files[0]; if (!file) return;
   const rd = new FileReader();
@@ -1313,11 +1359,14 @@ $('#file').addEventListener('change', () => {
 });
 function insertImage({ src, w, h }) {
   commitText(); clearSel();
-  const nb = cur.kind === 'notebook';
-  const maxW = nb ? 820 : Math.min(700, W * .6 / view.s);
+  const nb = cur.kind === 'notebook', place = pendingPlace; pendingPlace = null;
+  if (place && nb && place.pi < cur.pages.length) pageIdx = place.pi;
+  const maxW = nb ? (place ? 600 : 820) : Math.min(700, W * .6 / view.s);
   const ww = Math.min(maxW, w), hh = ww * h / w;
   let cx, cy;
-  if (nb) { cx = PAGE.w / 2; cy = Math.min(PAGE.h / 2, 120 + hh / 2); } else [cx, cy] = toWorld([W / 2, H / 2]);
+  if (place) [cx, cy] = place.w;
+  else if (nb) { cx = PAGE.w / 2; cy = Math.min(PAGE.h / 2, 120 + hh / 2); } else [cx, cy] = toWorld([W / 2, H / 2]);
+  if (nb) { cx = clamp(cx, ww / 2, Math.max(ww / 2, PAGE.w - ww / 2)); cy = clamp(cy, hh / 2, Math.max(hh / 2, PAGE.h - hh / 2)); }
   pushUndo(snap());
   const o = { id: uid(), src, x: cx - ww / 2, y: cy - hh / 2, w: ww, h: hh };
   page().images.push(o); scheduleSave();
