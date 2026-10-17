@@ -1781,7 +1781,10 @@ const IMG_SOURCES = {
         const t = p.imageinfo[0].thumburl; return { id: fileKey(p.title), title: p.title.replace(/^File:/, '').replace(/\.\w+$/, '').replace(/_/g, ' '), thumb: t.replace('/1280px-', '/330px-'), full: t, fallback: t.replace('/1280px-', '/960px-') };
       });
     };
-    const good = await go(`${q} incategory:"Quality images|Featured pictures on Wikimedia Commons|Valued images" filetype:bitmap`, 800);
+    const cats = 'incategory:"Quality images|Featured pictures on Wikimedia Commons|Valued images" filetype:bitmap';
+    const named = await go(`intitle:"${q}" ${cats}`, 800);            // the file name itself matches: usually what you meant
+    if (named.length >= 8) return named;
+    const good = named.concat((await go(`${q} ${cats}`, 800)).filter((x) => !named.some((n) => n.id === x.id)));
     return good.length >= 6 ? good : good.concat(await go(`${q} filetype:bitmap`, 1000));
   },
   async openverse(q, page) {
@@ -1793,19 +1796,40 @@ const IMG_SOURCES = {
 function searchSheet() {
   const s = sheet(`<h2>Search images</h2>
     <div class="srow"><input type="search" id="sq" placeholder="Search the web for images" enterkeyhint="search" autocapitalize="none" autocorrect="off" spellcheck="false"><button class="btn primary" data-go>Search</button></div>
+    <div class="note" id="scorr" hidden></div><div class="cats" id="stopics"></div>
     <div class="gal" id="sres" hidden></div><div class="note" id="smsg">Free-to-use pictures from Wikipedia, Wikimedia Commons and Openverse. Tap one to add it.</div>
     <div class="actions" style="margin-top:12px"><button class="btn ghost" data-x>Close</button></div>`);
   s.style.width = 'min(720px,calc(100vw - 32px))'; s.style.maxHeight = '90vh'; s.style.overflow = 'auto';
-  const inp = s.querySelector('#sq'), res = s.querySelector('#sres'), msg = s.querySelector('#smsg'), items = new Map();
+  const inp = s.querySelector('#sq'), res = s.querySelector('#sres'), msg = s.querySelector('#smsg'), corr = s.querySelector('#scorr'), topics = s.querySelector('#stopics'), items = new Map();
   let token = 0, page = 1, q = '', busy = false, done = false, t0 = 0;
   setTimeout(() => inp.focus(), 40);
-  const ORDER = ['wiki', 'commons', 'openverse'];
+  const ORDER = ['wiki', 'openverse', 'commons'];
   function add(list, grp) {
     const html = []; for (const it of list) { if (items.has(it.id)) continue; items.set(it.id, it); html.push(`<button data-id="${esc(it.id)}" aria-label="${esc(it.title)}"><img decoding="async" alt="" src="${esc(it.thumb)}" onerror="this.parentNode.remove()"><span class="cap">${esc(it.title)}</span></button>`); }
     grp.insertAdjacentHTML('beforeend', html.join('')); res.hidden = !items.size;
   }
-  async function load(reset) {
-    if (reset) { q = inp.value.trim(); if (!q) return; page = 1; done = false; items.clear(); res.innerHTML = ''; res.hidden = true; token++; }
+  /* understand the query first: fix spelling, and list the different things the words could mean */
+  async function resolveQuery(raw, exact) {
+    const api = (o) => fetch('https://en.wikipedia.org/w/api.php?' + new URLSearchParams({ format: 'json', origin: '*', action: 'query', ...o })).then((r) => r.json());
+    try {
+      const [a, b] = await Promise.all([api({ list: 'search', srsearch: raw, srinfo: 'suggestion', srprop: '', srlimit: '6' }), api({ list: 'prefixsearch', pssearch: raw, pslimit: '6' })]);
+      const hits = a.query.search.map((x) => x.title), pre = (b.query.prefixsearch || []).map((x) => x.title), sug = a.query.searchinfo && a.query.searchinfo.suggestion;
+      const toks = raw.toLowerCase().split(/\s+/).filter((t) => t.length > 2), matches = hits.some((t) => toks.some((k) => t.toLowerCase().includes(k)));
+      const fix = !exact && sug && sug.toLowerCase() !== raw.toLowerCase() && !matches;   // only when nothing real matches what was typed
+      let list = [...hits, ...pre];
+      if (fix) list = (await resolveQuery(sug, true)).topics;
+      const topics = []; for (const t of list) if (!/disambiguation|^Lists? of/i.test(t) && !topics.some((x) => x.toLowerCase() === t.toLowerCase()) && t.toLowerCase() !== (fix ? sug : raw).toLowerCase()) topics.push(t);
+      return { use: fix ? sug : raw, corrected: !!fix, topics: topics.slice(0, 8) };
+    } catch (e) { return { use: raw, corrected: false, topics: [] }; }
+  }
+  async function load(reset, exact) {
+    if (reset) {
+      const raw = inp.value.trim(); if (!raw) return; page = 1; done = false; items.clear(); res.innerHTML = ''; res.hidden = true; const my0 = ++token; busy = true;
+      msg.textContent = 'Searching…'; corr.hidden = true; topics.innerHTML = '';
+      const r = await resolveQuery(raw, exact); if (my0 !== token) return; q = r.use; busy = false;
+      if (r.corrected) { corr.innerHTML = `Showing results for <b>${esc(r.use)}</b> · <button data-orig style="color:var(--accent);font-weight:600">Search instead for “${esc(raw)}”</button>`; corr.hidden = false; corr.dataset.raw = raw; }
+      topics.innerHTML = r.topics.map((t) => `<button data-topic="${esc(t)}">${esc(t)}</button>`).join('');
+    }
     else if (busy || done) return;
     const my = token, pg = page; busy = true; msg.textContent = 'Searching…';
     const groups = {}; for (const k of ORDER) { groups[k] = document.createElement('div'); groups[k].className = 'grp'; res.appendChild(groups[k]); }   // fixed order: best matches stay on top
@@ -1820,6 +1844,8 @@ function searchSheet() {
   s.onclick = (e) => {
     if (e.target.closest('[data-x]')) closeOverlay();
     if (e.target.closest('[data-go]')) load(true);
+    if (e.target.closest('[data-orig]')) { inp.value = corr.dataset.raw; load(true, true); }
+    const tp = e.target.closest('[data-topic]'); if (tp) { inp.value = tp.dataset.topic; load(true, true); }
     const b = e.target.closest('[data-id]'); if (b) { const it = items.get(b.dataset.id); closeOverlay(); importImageURL(it.full, it.fallback); }
   };
   inp.onkeydown = (e) => { if (e.key === 'Enter') { clearTimeout(t0); load(true); } };
