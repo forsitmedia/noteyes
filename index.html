@@ -145,6 +145,19 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 #stage.drop{outline:3px dashed var(--accent);outline-offset:-6px}
 .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));grid-auto-rows:128px;gap:10px;align-content:start;margin-top:12px;height:min(58vh,620px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .gal[hidden]{display:none}
+.shp{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.shp button{aspect-ratio:1.15;border-radius:12px;background:var(--panel);border:1.5px solid transparent;display:grid;place-items:center;color:var(--ink)}
+.shp button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+.shp svg{width:34px;height:30px;fill:none;stroke:currentColor;stroke-width:6;stroke-linecap:round;stroke-linejoin:round;overflow:visible}
+.libbtn{width:100%;margin-top:10px;height:42px;border-radius:12px;background:var(--accent-soft);color:var(--accent);font-weight:600;font-size:14px}
+.gal.gal-i{grid-template-columns:repeat(auto-fill,minmax(84px,1fr));grid-auto-rows:84px;height:min(46vh,480px)}
+.gal-i img{inset:14px;width:calc(100% - 28px);height:calc(100% - 28px);object-fit:contain}
+.cats{display:flex;gap:6px;overflow-x:auto;margin-top:10px;padding-bottom:2px;-webkit-overflow-scrolling:touch}
+.cats button{flex:none;padding:7px 13px;border-radius:999px;background:var(--bg);font-size:13px;font-weight:600;color:var(--muted)}
+.cats button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.icol{display:flex;gap:8px;margin-top:10px;align-items:center}
+.icol button{width:26px;height:26px;border-radius:50%;background:var(--c);border:2px solid var(--panel);box-shadow:0 0 0 1px var(--line)}
+.icol button[aria-pressed="true"]{box-shadow:0 0 0 2.5px var(--accent)}
 .gal .grp{display:contents}
 .gal button{position:relative;display:block;width:100%;height:100%;padding:0;border:0;border-radius:12px;overflow:hidden;background:var(--bg)}
 .gal img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
@@ -626,12 +639,13 @@ $('#rail').addEventListener('click', (e) => {
     const pop = popover(btn, `
       <button class="row" data-a="library">${ic('image')}<span>Photos &amp; Files<small>Library, camera or a file</small></span></button>
       <button class="row" data-a="search">${ic('search')}<span>Search the web<small>Find an image and add it</small></span></button>
+      <button class="row" data-a="icons">${ic('shape')}<span>Icons &amp; stickers<small>Searchable library</small></span></button>
       <button class="row" data-a="paste">${ic('image')}<span>Paste image<small>From the clipboard</small></span></button>`,
     (a, b) => {
       pendingPlace = null;
       if (a === 'library') { const rb = b.getBoundingClientRect(), f = $('#file'); f.style.left = rb.left + 'px'; f.style.top = rb.top + 'px'; closeOverlay(); pickImage(false); return; }
       closeOverlay();
-      if (a === 'search') searchSheet(); if (a === 'paste') pasteFromClipboard();
+      if (a === 'search') searchSheet(); if (a === 'icons') iconSheet(); if (a === 'paste') pasteFromClipboard();
     });
     place(pop, r, 'right'); return;
   }
@@ -687,7 +701,7 @@ function openToolSettings(kind, btn) {
     if (kind === 'hl') extra = `<div class="seg"><button data-straight="0" aria-pressed="${!cfg.straight}">Freehand</button><button data-straight="1" aria-pressed="${!!cfg.straight}">Straight lines</button></div>`;
     if (kind === 'eraser') extra = `<div class="seg"><button data-mode="stroke" aria-pressed="${cfg.mode === 'stroke'}">Whole stroke</button><button data-mode="partial" aria-pressed="${cfg.mode === 'partial'}">Partial</button></div>
       <div class="ctl"><div class="ctl-top"><span>Size</span><b><span data-val="esize">${cfg.size}</span></b></div><input type="range" id="r-eraser-size" data-k="size" min="1" max="20" step="1" value="${cfg.size}" aria-label="Eraser size"></div>`;
-    if (kind === 'shape') extra = `<div class="seg" style="grid-auto-flow:row;grid-template-columns:repeat(4,1fr)">${SHAPES.map(([k, l]) => `<button data-shape="${k}" aria-pressed="${cfg.kind === k}">${l}</button>`).join('')}</div>`;
+    if (kind === 'shape') extra = `<div class="shp">${SHAPES.map(([k, l]) => `<button data-shape="${k}" aria-label="${l}" title="${l}" aria-pressed="${cfg.kind === k}">${shapeIcon(k)}</button>`).join('')}</div><button class="libbtn" data-lib>Icons, stickers &amp; emoji…</button>`;
     if (kind === 'text') extra = `<div class="ctl"><div class="ctl-top"><span>Text size</span><b><span data-val="tsize">${cfg.size}</span></b></div><input type="range" id="r-text-size" data-k="size" min="12" max="96" step="2" value="${cfg.size}" aria-label="Text size"></div>`;
     const pal = cfg.color ? `<hr><div class="pal-head"><span>Color</span><button class="rainbow" data-pick aria-label="Custom color">+</button></div>
       <div class="pal">${prefs.palette.map((c) => `<button data-col="${c}" style="--c:${c}" aria-label="${c}" aria-pressed="${c.toLowerCase() === cfg.color.toLowerCase()}"></button>`).join('')}<button class="addc" data-pick aria-label="Add a color">+</button></div>` : '';
@@ -715,6 +729,7 @@ function openToolSettings(kind, btn) {
   });
   el.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.lib !== undefined) { closeOverlay(); iconSheet(); return; }
     if (b.dataset.reset !== undefined) Object.assign(cfg, DEFAULTS[kind]);
     if (b.dataset.pm) { const d = sliderRange(b.dataset.k, kind); cfg[b.dataset.k] = +clamp(cfg[b.dataset.k] + (b.dataset.pm === '+' ? .1 : -.1), d.min, d.max).toFixed(1); }
     if (b.dataset.style) cfg.style = b.dataset.style;
@@ -728,7 +743,7 @@ function openToolSettings(kind, btn) {
   render();
   place(el, btn.getBoundingClientRect(), 'right');
 }
-const SHAPES = [['line', 'Line'], ['arrow', 'Arrow'], ['rect', 'Box'], ['oval', 'Oval'], ['tri', 'Triangle'], ['diamond', 'Diamond'], ['star', 'Star']];
+const SHAPES = [['line', 'Line'], ['arrow', 'Arrow'], ['darrow', 'Double arrow'], ['barrow', 'Block arrow'], ['rect', 'Box'], ['rrect', 'Rounded box'], ['oval', 'Oval'], ['tri', 'Triangle'], ['diamond', 'Diamond'], ['pent', 'Pentagon'], ['hex', 'Hexagon'], ['star', 'Star'], ['heart', 'Heart'], ['cross', 'Plus'], ['para', 'Parallelogram'], ['trap', 'Trapezoid']];
 function shapeStroke(kind, a, b, size) {
   const [x0, y0] = a, [x1, y1] = b, L = Math.min(x0, x1), R = Math.max(x0, x1), Tp = Math.min(y0, y1), B = Math.max(y0, y1), cx = (L + R) / 2, cy = (Tp + B) / 2;
   let poly, closed = true;
@@ -737,6 +752,20 @@ function shapeStroke(kind, a, b, size) {
     const ang = Math.atan2(y1 - y0, x1 - x0), hl = Math.min(46, Math.hypot(x1 - x0, y1 - y0) * .35), sp = .5;
     poly = [[x0, y0], [x1, y1], [x1 - hl * Math.cos(ang - sp), y1 - hl * Math.sin(ang - sp)], [x1, y1], [x1 - hl * Math.cos(ang + sp), y1 - hl * Math.sin(ang + sp)]]; closed = false;
   }
+  else if (kind === 'darrow') {
+    const ang = Math.atan2(y1 - y0, x1 - x0), hl = Math.min(46, Math.hypot(x1 - x0, y1 - y0) * .3), sp = .5, c = Math.cos, sn = Math.sin;
+    poly = [[x0 + hl * c(ang - sp), y0 + hl * sn(ang - sp)], [x0, y0], [x0 + hl * c(ang + sp), y0 + hl * sn(ang + sp)], [x0, y0], [x1, y1], [x1 - hl * c(ang - sp), y1 - hl * sn(ang - sp)], [x1, y1], [x1 - hl * c(ang + sp), y1 - hl * sn(ang + sp)]]; closed = false;
+  }
+  else if (kind === 'barrow') { const hx = L + (R - L) * .58, sh = (B - Tp) * .3; poly = [[L, cy - sh], [hx, cy - sh], [hx, Tp], [R, cy], [hx, B], [hx, cy + sh], [L, cy + sh]]; }
+  else if (kind === 'rrect') {
+    const r = Math.min(R - L, B - Tp) * .22; poly = [];
+    for (const [ax, ay, a0] of [[R - r, Tp + r, -Math.PI / 2], [R - r, B - r, 0], [L + r, B - r, Math.PI / 2], [L + r, Tp + r, Math.PI]]) for (let i = 0; i <= 6; i++) { const a = a0 + i * Math.PI / 12; poly.push([ax + r * Math.cos(a), ay + r * Math.sin(a)]); }
+  }
+  else if (kind === 'pent' || kind === 'hex') { const n = kind === 'pent' ? 5 : 6; poly = []; for (let i = 0; i < n; i++) { const an = (kind === 'pent' ? -Math.PI / 2 : 0) + i * 2 * Math.PI / n; poly.push([cx + (R - L) / 2 * Math.cos(an), cy + (B - Tp) / 2 * Math.sin(an)]); } }
+  else if (kind === 'heart') { poly = []; for (let i = 0; i < 80; i++) { const t = i / 80 * Math.PI * 2, hx = 16 * Math.pow(Math.sin(t), 3), hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t); poly.push([cx + hx / 16 * (R - L) / 2, Tp + (12 - hy) / 29 * (B - Tp)]); } }
+  else if (kind === 'cross') { const a = (R - L) / 3, b = (B - Tp) / 3; poly = [[L + a, Tp], [R - a, Tp], [R - a, Tp + b], [R, Tp + b], [R, B - b], [R - a, B - b], [R - a, B], [L + a, B], [L + a, B - b], [L, B - b], [L, Tp + b], [L + a, Tp + b]]; }
+  else if (kind === 'para') { const k = (R - L) * .25; poly = [[L + k, Tp], [R, Tp], [R - k, B], [L, B]]; }
+  else if (kind === 'trap') { const k = (R - L) * .2; poly = [[L + k, Tp], [R - k, Tp], [R, B], [L, B]]; }
   else if (kind === 'rect') poly = [[L, Tp], [R, Tp], [R, B], [L, B]];
   else if (kind === 'tri') poly = [[cx, Tp], [R, B], [L, B]];
   else if (kind === 'diamond') poly = [[cx, Tp], [R, cy], [cx, B], [L, cy]];
@@ -752,6 +781,13 @@ function shapeStroke(kind, a, b, size) {
     const last = ring[ring.length - 1]; pts.push(+last[0].toFixed(1), +last[1].toFixed(1), .5);
   }
   return { tool: 'ball', color: T.shape.color, w: size * 3, op: 1, style: 'solid', pts };
+}
+const shapeIcons = {};
+function shapeIcon(kind) {   // a drawn preview built from the very same geometry the tool uses
+  if (shapeIcons[kind]) return shapeIcons[kind];
+  const pts = shapeStroke(kind, [0, 0], [100, 84], 1).pts; let d = '';
+  for (let i = 0; i < pts.length; i += 3) d += (i ? 'L' : 'M') + pts[i] + ' ' + pts[i + 1];
+  return (shapeIcons[kind] = `<svg viewBox="-6 -6 112 96" aria-hidden="true"><path d="${d}"/></svg>`);
 }
 function makeStrokeTemplate(kind) {
   const c = T[kind];
@@ -1790,6 +1826,85 @@ function searchSheet() {
   inp.addEventListener('input', () => { clearTimeout(t0); t0 = setTimeout(() => load(true), 450); });   // results follow your typing
   res.addEventListener('scroll', () => { if (res.scrollTop + res.clientHeight > res.scrollHeight - 160) load(false); });
 }
+/* icon & emoji library (Iconify): curated sets, plus search across hundreds of thousands of icons */
+const ICON_CATS = {
+  Basics: ['check', 'close', 'plus', 'minus', 'star', 'heart', 'flag', 'bookmark', 'map-marker', 'lightbulb', 'alert', 'help-circle', 'information', 'bell', 'clock-outline', 'calendar', 'lock', 'eye', 'magnify', 'cog', 'check-circle', 'close-circle', 'thumb-up', 'thumb-down'],
+  Arrows: ['arrow-right', 'arrow-left', 'arrow-up', 'arrow-down', 'arrow-top-right', 'arrow-bottom-right', 'arrow-left-right', 'arrow-up-down', 'chevron-right', 'chevron-double-right', 'undo', 'redo', 'refresh', 'sync', 'arrow-expand-all', 'swap-horizontal', 'source-branch', 'transit-connection-variant', 'arrow-right-bold', 'arrow-right-bold-circle'],
+  Work: ['file-document', 'folder', 'email', 'phone', 'chart-line', 'chart-bar', 'chart-pie', 'presentation', 'briefcase', 'cash', 'credit-card', 'cart', 'tag', 'link', 'paperclip', 'pencil', 'account', 'account-group', 'target', 'trophy', 'rocket', 'puzzle', 'key', 'share-variant'],
+  Study: ['book-open-variant', 'school', 'calculator', 'flask', 'atom', 'earth', 'palette', 'music-note', 'brush', 'microscope', 'translate', 'laptop', 'lightbulb-on', 'brain', 'pi', 'function-variant', 'ruler', 'dna', 'telescope', 'clipboard-text'],
+  Nature: ['weather-sunny', 'weather-cloudy', 'weather-night', 'weather-rainy', 'tree', 'flower', 'leaf', 'water', 'fire', 'snowflake', 'paw', 'bird', 'fish', 'mountain', 'cat', 'dog', 'bug', 'cactus'],
+  Places: ['home', 'airplane', 'car', 'bike', 'train', 'bus', 'walk', 'camera', 'image', 'castle', 'bridge', 'beach', 'tent', 'ferry', 'hospital-building', 'store', 'silverware-fork-knife', 'coffee']
+};
+const EMOJI_CATS = { Faces: ['grinning', 'smiling', 'laughing', 'winking', 'heart-eyes', 'thinking'], Hearts: ['heart'], Hands: ['hand', 'thumbs'], Animals: ['cat', 'dog', 'bird', 'fish'], Food: ['pizza', 'apple', 'cake', 'coffee'], Travel: ['car', 'airplane', 'house', 'sun'], Party: ['party', 'balloon', 'star', 'fire'] };
+function iconSheet() {
+  let mode = 'icons', cat = 'Basics', color = T.shape.color || '#111418', token = 0, tmr = 0;
+  const s = sheet(`<h2>Icons &amp; stickers</h2>
+    <div class="seg" style="margin-top:10px"><button data-mode="icons" aria-pressed="true">Icons</button><button data-mode="emoji" aria-pressed="false">Emoji</button></div>
+    <div class="srow"><input type="search" id="iq" placeholder="Search: heart, arrow, school, pizza…" enterkeyhint="search" autocapitalize="none" autocorrect="off" spellcheck="false"></div>
+    <div class="cats" id="icats"></div><div class="icol" id="icol"></div>
+    <div class="gal gal-i" id="igrid"></div><div class="note" id="imsg"></div>
+    <div class="actions" style="margin-top:12px"><button class="btn ghost" data-x>Close</button></div>`);
+  s.style.width = 'min(720px,calc(100vw - 32px))'; s.style.maxHeight = '92vh'; s.style.overflow = 'auto';
+  const inp = s.querySelector('#iq'), grid = s.querySelector('#igrid'), msg = s.querySelector('#imsg'), cats = s.querySelector('#icats'), col = s.querySelector('#icol');
+  const iconCache = iconSheet.cache || (iconSheet.cache = new Map());
+  async function fetchIcons(ids) {   // one request per icon set for the whole batch
+    const need = ids.filter((id) => !iconCache.has(id)), by = {};
+    for (const id of need) { const [pre, name] = id.split(':'); (by[pre] = by[pre] || []).push(name); }
+    await Promise.all(Object.entries(by).map(async ([pre, names]) => {
+      for (let i = 0; i < names.length; i += 60) {
+        try {
+          const d = await (await fetch(`https://api.iconify.design/${pre}.json?icons=${names.slice(i, i + 60).join(',')}`)).json();
+          for (const [n, ic] of Object.entries(d.icons || {})) iconCache.set(pre + ':' + n, { body: ic.body, w: ic.width || d.width || 16, h: ic.height || d.height || 16 });
+        } catch (e) {}
+      }
+    }));
+  }
+  const svgOf = (id, c, px) => { const d = iconCache.get(id); if (!d) return null; return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${d.w} ${d.h}" width="${px ? px : d.w}" height="${px ? px * d.h / d.w : d.h}">${d.body.replace(/currentColor/g, c)}</svg>`; };
+  function chrome() {
+    const names = Object.keys(mode === 'icons' ? ICON_CATS : EMOJI_CATS);
+    cats.innerHTML = names.map((n) => `<button data-cat="${n}" aria-pressed="${!inp.value.trim() && n === cat}">${n}</button>`).join('');
+    col.innerHTML = mode === 'icons' ? prefs.palette.slice(0, 9).map((c) => `<button data-col="${c}" style="--c:${c}" aria-label="Color ${c}" aria-pressed="${c.toLowerCase() === color.toLowerCase()}"></button>`).join('') : '';
+    s.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+  }
+  async function show(ids, my) {
+    await fetchIcons(ids); if (my !== token) return;
+    const tiles = ids.map((id) => { const svg = svgOf(id, color); return svg ? `<button data-id="${esc(id)}" aria-label="${esc(id.split(':')[1].replace(/-/g, ' '))}"><img alt="" src="data:image/svg+xml;utf8,${encodeURIComponent(svg)}"></button>` : ''; });
+    grid.innerHTML = tiles.join('');
+    msg.textContent = grid.children.length ? 'Tap one to add it to your page' : 'Nothing found. Try another word.';
+  }
+  async function search(terms, limit) {
+    const pre = mode === 'icons' ? 'mdi,lucide,tabler,ph' : 'noto,fluent-emoji-flat';
+    const out = []; const lists = await Promise.all(terms.map((t) => fetch(`https://api.iconify.design/search?query=${encodeURIComponent(t)}&limit=${limit}&prefixes=${pre}`).then((r) => r.json()).then((d) => d.icons || []).catch(() => [])));
+    for (const l of lists) for (const id of l) if (!out.includes(id)) out.push(id);
+    return out;
+  }
+  async function render() {
+    chrome(); const my = ++token, q = inp.value.trim();
+    msg.textContent = 'Loading…';
+    if (!q && mode === 'icons') { show(ICON_CATS[cat].map((n) => 'mdi:' + n), my); return; }
+    const ids = await search(q ? [q] : EMOJI_CATS[cat], q ? 64 : 24); if (my === token) show(ids, my);
+  }
+  async function add(id) {
+    closeOverlay(); toast('Adding…');
+    const svg = svgOf(id, mode === 'icons' ? color : '#000', 512); if (!svg) { toast('Could not add that icon'); return; }
+    const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })), im = new Image();
+    im.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = 512; cv.height = Math.max(8, Math.round(512 * im.naturalHeight / im.naturalWidth)); cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+      const src = cv.toDataURL('image/png'), g = getImg(src), go = () => insertImage({ src, w: 220, h: 220 * cv.height / cv.width, top: true });
+      if (g.complete && g.naturalWidth) go(); else g.addEventListener('load', go, { once: true });
+    };
+    im.onerror = () => toast('Could not add that icon'); im.src = url;
+  }
+  s.onclick = (e) => {
+    if (e.target.closest('[data-x]')) { closeOverlay(); return; }
+    const m = e.target.closest('[data-mode]'); if (m) { mode = m.dataset.mode; cat = Object.keys(mode === 'icons' ? ICON_CATS : EMOJI_CATS)[0]; inp.value = ''; render(); return; }
+    const c = e.target.closest('[data-cat]'); if (c) { cat = c.dataset.cat; inp.value = ''; render(); return; }
+    const k = e.target.closest('[data-col]'); if (k) { color = k.dataset.col; render(); return; }
+    const b = e.target.closest('[data-id]'); if (b) add(b.dataset.id);
+  };
+  inp.addEventListener('input', () => { clearTimeout(tmr); tmr = setTimeout(render, 350); });
+  render();
+}
 /* press and hold (or right click) anywhere on the page for a quick add-image menu at that spot */
 let lp = null, lpFired = false;
 function clearLP() { if (lp) { clearTimeout(lp.t); lp = null; } }
@@ -1819,7 +1934,7 @@ stage.addEventListener('drop', (e) => {
   const u = (e.dataTransfer.getData('text/uri-list') || '').split('\n')[0].trim(), html = e.dataTransfer.getData('text/html'), m = html && html.match(/<img[^>]+src=["']([^"']+)/i);
   if (m || u) importImageURL(m ? m[1] : u);
 });
-function insertImage({ src, w, h }) {
+function insertImage({ src, w, h, top }) {
   commitText(); clearSel();
   const nb = cur.kind === 'notebook', place = pendingPlace; pendingPlace = null;
   if (place && nb && place.pi < cur.pages.length) pageIdx = place.pi;
@@ -1831,6 +1946,7 @@ function insertImage({ src, w, h }) {
   if (nb) { cx = clamp(cx, ww / 2, Math.max(ww / 2, PAGE.w - ww / 2)); cy = clamp(cy, hh / 2, Math.max(hh / 2, PAGE.h - hh / 2)); }
   pushUndo(snap());
   const o = { id: uid(), src, x: cx - ww / 2, y: cy - hh / 2, w: ww, h: hh };
+  if (top) o.top = true;
   page().images.push(o); scheduleSave();
   toolKind = 'select'; afterInsert = true; buildRail(); makeSel([], [o], []);
 }
