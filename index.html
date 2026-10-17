@@ -138,7 +138,7 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 #stage{position:absolute;inset:0;touch-action:none}
 #stage canvas{position:absolute;inset:0;width:100%;height:100%}
 #live{touch-action:none}
-#file{position:fixed;left:50%;top:40%;width:2px;height:2px;opacity:0;pointer-events:none;z-index:-1}
+#file{position:fixed;left:50%;top:40%;width:48px;height:48px;border-radius:12px;opacity:0;pointer-events:none;z-index:-1}
 #ted{position:absolute;z-index:4;margin:0;padding:0;border:0;outline:1.5px dashed var(--accent);outline-offset:6px;border-radius:2px;background:transparent;resize:none;overflow:hidden;line-height:1.3;font-family:var(--f-body);white-space:pre-wrap;transform-origin:0 0;user-select:text;-webkit-user-select:text}
 .topbar{position:absolute;z-index:5;top:calc(10px + env(safe-area-inset-top,0px));left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));display:flex;gap:10px;align-items:center;pointer-events:none;flex-wrap:wrap}
 .bar{pointer-events:auto;display:flex;align-items:center;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:4px;box-shadow:0 6px 20px -10px var(--shadow)}
@@ -774,6 +774,7 @@ function skipSet() {
   if (editing && editing.t) s.add(editing.t);
   return s.size ? s : null;
 }
+const pageCache = new Map();   // per-page bitmaps reused while scrolling so only a blit happens per frame
 const poy = () => cur.kind === 'notebook' ? pageIdx * STRIDE * view.s : 0;   // screen offset of the active page
 function visPage() { return clamp(Math.floor(((H / 2 - view.oy) / view.s) / STRIDE), 0, cur.pages.length - 1); }
 function updatePageNo() {
@@ -810,6 +811,8 @@ function renderBase() {
     c.restore(); return;
   }
   const skip = skipSet();
+  if (!panFrame) pageCache.clear();
+  cacheScaled = false;
   c.save(); c.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * oy);
   c.shadowColor = 'rgba(15,25,45,.22)'; c.shadowBlur = 24 * dpr; c.shadowOffsetY = 6 * dpr;
   c.fillStyle = PAPER; c.fillRect(0, 0, PAGE.w, cur.pages.length * STRIDE - GAP); c.restore();
@@ -817,6 +820,22 @@ function renderBase() {
     const top = oy + i * STRIDE * s;
     if (top > H || top + PAGE.h * s < 0) continue;
     c.save();
+    const useCache = panFrame && !(i === pageIdx && skip) && PAGE.w * s * dpr <= 2600;
+    if (useCache) {
+      let e = pageCache.get(i);
+      if (!e || e.paper !== cur.paper || e.dpr !== dpr) {
+        const cv = document.createElement('canvas'); cv.width = Math.ceil(PAGE.w * s * dpr); cv.height = Math.ceil(PAGE.h * s * dpr);
+        const cc = cv.getContext('2d'); cc.setTransform(cv.width / PAGE.w, 0, 0, cv.height / PAGE.h, 0, 0);
+        cc.fillStyle = PAPER; cc.fillRect(0, 0, PAGE.w, PAGE.h);
+        drawPattern(cc, cur.paper, 0, 0, PAGE.w, PAGE.h, s, true); drawContent(cc, cur.pages[i]);
+        e = { cv, s, paper: cur.paper, dpr }; pageCache.set(i, e);
+      }
+      if (e.s !== s) cacheScaled = true;
+      c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(e.cv, dpr * ox, dpr * top, PAGE.w * s * dpr, PAGE.h * s * dpr);
+      c.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * top);
+      if (i < cur.pages.length - 1) { c.fillStyle = 'rgba(60,80,120,.2)'; c.fillRect(0, PAGE.h - 1.5 / s, PAGE.w, 1.5 / s); }
+      c.restore(); continue;
+    }
     c.setTransform(dpr * s, 0, 0, dpr * s, dpr * ox, dpr * top);
     c.fillStyle = PAPER; c.fillRect(0, 0, PAGE.w, PAGE.h);
     c.beginPath(); c.rect(0, 0, PAGE.w, PAGE.h); c.clip();
@@ -876,6 +895,8 @@ function positionCtx() {
   el.style.left = clamp(cx, el.offsetWidth / 2 + 8, W - el.offsetWidth / 2 - 8) + 'px';
   el.style.top = (top - h > 64 ? top - h : Math.min(bot, H - h - 12)) + 'px';
 }
+let panFrame = false, cacheScaled = false;
+let rafP = 0; function queuePan() { if (!rafP) rafP = requestAnimationFrame(() => { rafP = 0; panFrame = true; renderBase(); panFrame = false; renderLive(); }); }
 let rafB = 0; function queueBase() { if (!rafB) rafB = requestAnimationFrame(() => { rafB = 0; renderBase(); renderLive(); }); }
 let rafL = 0; function queueLive() { if (!rafL) rafL = requestAnimationFrame(() => { rafL = 0; renderLive(); }); }
 
@@ -1196,8 +1217,8 @@ function glide(v) {
   const step = (now) => {
     const dt = Math.min(32, now - last); last = now;
     view.ox += v[0] * dt; view.oy += v[1] * dt; const f = Math.pow(.997, dt); v = [v[0] * f, v[1] * f];
-    renderBase(); renderLive();
-    if (Math.hypot(v[0], v[1]) > .03) glideRaf = requestAnimationFrame(step); else { glideRaf = 0; persistView(); }
+    panFrame = true; renderBase(); panFrame = false; renderLive();
+    if (Math.hypot(v[0], v[1]) > .03) glideRaf = requestAnimationFrame(step); else { glideRaf = 0; persistView(); if (cacheScaled) queueBase(); }
   };
   glideRaf = requestAnimationFrame(step);
 }
@@ -1219,7 +1240,7 @@ function moveGesture() {
     gesture.v = [(gesture.v ? gesture.v[0] * .6 : 0) + .4 * dx / dt, (gesture.v ? gesture.v[1] * .6 : 0) + .4 * dy / dt]; gesture.t = now;
   }
   if (tapInfo) tapInfo.moved += moved;
-  gesture.c = c; view.user = true; queueBase();
+  gesture.c = c; view.user = true; queuePan();
 }
 function cancelAction() {
   if (!action) return;
@@ -1380,7 +1401,7 @@ live.addEventListener('pointermove', (e) => {
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     for (const ev of (evs.length ? evs : [e])) { const ww = toWorld(local(ev)); eraseAt(ww, a.prev); a.prev = ww; }
     eraserAt = w; queueLive();
-  } else if (a.type === 'pan') { view.ox += pt[0] - a.last[0]; view.oy += pt[1] - a.last[1]; a.last = pt; view.user = true; queueBase(); }
+  } else if (a.type === 'pan') { view.ox += pt[0] - a.last[0]; view.oy += pt[1] - a.last[1]; a.last = pt; view.user = true; queuePan(); }
   else if (a.type === 'lasso') {
     const l = lassoPts.length; a.travel += Math.hypot(w[0] - lassoPts[l - 2], w[1] - lassoPts[l - 1]) * view.s;
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
@@ -1406,7 +1427,7 @@ function endPointer(e) {
     if (gesture) {
       if (touches.size) startGesture();
       else {
-        const g = gesture; gesture = null; persistView();
+        const g = gesture; gesture = null; persistView(); if (cacheScaled) queueBase();
         if (g.v && !g.d && performance.now() - g.t < 70 && Math.hypot(g.v[0], g.v[1]) > .25 && (!tapInfo || tapInfo.moved > 14)) glide(g.v);
         if (tapInfo && performance.now() - tapInfo.t0 < 320 && tapInfo.moved < 14 && tapInfo.max >= 2) { tapInfo.max === 2 ? (doUndo(), toast('Undo')) : (doRedo(), toast('Redo')); }
         else if (tapTool() && tapInfo && tapInfo.max === 1 && performance.now() - tapInfo.t0 < 500 && tapInfo.moved < 12) tapAt(tapInfo.pt);
@@ -1441,7 +1462,7 @@ live.addEventListener('wheel', (e) => {
     const pt = local(e), ns = clamp(view.s * Math.exp(-e.deltaY * .01), .15, 6), k = ns / view.s;
     view.ox = pt[0] - (pt[0] - view.ox) * k; view.oy = pt[1] - (pt[1] - view.oy) * k; view.s = ns;
   } else { view.ox -= e.deltaX; view.oy -= e.deltaY; }
-  view.user = true; queueBase(); clearTimeout(live._wt); live._wt = setTimeout(persistView, 300);
+  view.user = true; queuePan(); clearTimeout(live._wt); live._wt = setTimeout(() => { persistView(); if (cacheScaled) queueBase(); }, 300);
 }, { passive: false });
 
 /* ================= images ================= */
@@ -1493,7 +1514,7 @@ let pendingPlace = null;
 function placeImageAt(pt) {
   activatePageAt(pt); pendingPlace = { pi: pageIdx, w: toWorld(pt) };
   const r = stage.getBoundingClientRect(), f = $('#file');   // the system picker menu anchors to this input, so park it on the tap
-  f.style.left = (r.left + pt[0]) + 'px'; f.style.top = (r.top + pt[1]) + 'px';
+  f.style.left = (r.left + pt[0] - 24) + 'px'; f.style.top = (r.top + pt[1] - 24) + 'px';
   pickImage(false, true);
 }
 function pickImage(asNew, keepPlace) { if (!keepPlace) { pendingPlace = null; const f0 = $('#file'); f0.style.left = '50%'; f0.style.top = '40%'; } pendingNewFromPhoto = asNew; const f = $('#file'); f.value = ''; f.click(); }
