@@ -238,9 +238,10 @@ const DEFAULTS = {
   hl: { size: 1, op: .4, straight: false, color: '#f5c84c' },
   eraser: { mode: 'stroke', size: 2 },
   text: { size: 28, color: '#111418' },
+  shape: { kind: 'rect', size: 1, color: '#111418' },
   bucket: { color: '#3b78e7' }
 };
-const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas', image: 'Image', bucket: 'Fill bucket' };
+const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas', image: 'Image', bucket: 'Fill bucket', shape: 'Shapes' };
 
 const I = {
   back: '<path d="M15 5l-7 7 7 7"/>',
@@ -258,6 +259,7 @@ const I = {
   lasso: '<ellipse cx="12" cy="9" rx="8" ry="5" stroke-dasharray="2.6 2.4"/><path d="M8.5 13.5c-1.5 1.8-.8 4 1.4 4 1.6 0 2 1.4 1.1 3"/>',
   text: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 8.5h8M12 8.5v8"/>',
   hand: '<path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5M11 10.5V4.5a1.5 1.5 0 0 1 3 0v6M14 10.5V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-.5a5 5 0 0 1-4.1-2.2L4 14.5a1.5 1.5 0 0 1 2.4-1.8L8 14.5"/>',
+  shape: '<rect x="3.5" y="11" width="9" height="9" rx="1.5"/><circle cx="15.5" cy="8.5" r="5"/>',
   bucket: '<path d="M5 12l7-7 7 7-6.5 6.5a2 2 0 0 1-2.8 0z"/><path d="M12 5L9.5 2.5M20 15c1.2 1.6 1.5 2.4 1.5 3.2a1.5 1.5 0 0 1-3 0c0-.8.3-1.6 1.5-3.2z"/>',
   image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
@@ -311,7 +313,8 @@ let sel = null;       // lasso selection
 let editing = null;   // text being edited
 const imgCache = new Map();
 if (!T.bucket) T.bucket = { color: '#3b78e7' };
-const colorTool = () => (['fountain', 'ball', 'hl', 'text', 'bucket'].includes(toolKind) ? toolKind : null);
+if (!T.shape) T.shape = { kind: 'rect', size: 1, color: '#111418' };
+const colorTool = () => (['fountain', 'ball', 'hl', 'text', 'bucket', 'shape'].includes(toolKind) ? toolKind : null);
 
 /* ================= ink engine ================= */
 const ease = (x) => (x >= 1 ? 1 : x <= 0 ? 0 : 1 - (1 - x) * (1 - x));
@@ -581,11 +584,11 @@ let W = 0, H = 0, dpr = 1;
 $('#paperbtn').innerHTML = ic('paper'); $('#fit').innerHTML = ic('fit'); $('#emore').innerHTML = ic('more');
 
 function buildRail() {
-  const tools = ['fountain', 'ball', 'hl', 'eraser', 'lasso', 'text', 'bucket', 'hand'];
+  const tools = ['fountain', 'ball', 'hl', 'eraser', 'lasso', 'shape', 'text', 'bucket', 'hand'];
   const ct = colorTool(), cc = ct ? T[ct].color : null;
   $('#rail').innerHTML =
     tools.map((k) => `<button class="ib" data-t="${k}" aria-label="${TOOL_NAMES[k]}" title="${TOOL_NAMES[k]}${T[k] ? ' · tap again for settings' : ''}" aria-pressed="${toolKind === k}">${ic(k)}${T[k] && T[k].color ? `<i class="dot" style="--c:${T[k].color}"></i>` : ''}</button>`).join('') +
-    `<button class="ib" data-t="image" aria-label="Image" title="Image · then tap where it goes" aria-pressed="${toolKind === 'image'}">${ic('image')}</button><hr>` +
+    `<button class="ib" data-img aria-label="Insert image" title="Insert image">${ic('image')}</button><hr>` +
     prefs.palette.slice(0, 6).map((c) => `<button class="sw" data-c="${c}" style="--c:${c}" aria-label="Color ${c}" aria-pressed="${c === cc}"><span></span></button>`).join('');
 }
 $('#rail').addEventListener('click', (e) => {
@@ -594,9 +597,12 @@ $('#rail').addEventListener('click', (e) => {
     const k = t.dataset.t;
     if (k === toolKind && T[k]) { openToolSettings(k, t); return; }
     setTool(k);
-    if (k === 'image') toast('Tap on the page where the image should go');
     if (k === 'bucket') toast('Tap inside a shape to fill it · tap the bucket again for colors');
     if (T[k] && !prefs.hintShown) { prefs.hintShown = true; savePrefs(); toast('Tap the tool again to change its settings'); }
+  }
+  if (e.target.closest('[data-img]')) {   // park the hidden input on the button so the system menu opens beside the rail
+    const r = e.target.closest('[data-img]').getBoundingClientRect(), f = $('#file');
+    f.style.left = r.left + 'px'; f.style.top = r.top + 'px'; pickImage(false); return;
   }
   if (c) { const ct = colorTool() || (setTool('fountain'), 'fountain'); T[ct].color = c.dataset.c; savePrefs(); applyColorToEditing(); buildRail(); }
 });
@@ -622,7 +628,7 @@ const TOOL_CTRLS = {
   fountain: ['stab', 'tip', 'sens', 'size', 'op'],
   ball: ['stab', 'size', 'op'],
   hl: ['size', 'op'],
-  eraser: [], text: [], bucket: []
+  eraser: [], text: [], bucket: [], shape: ['size']
 };
 const LINE_SVG = {
   solid: '<svg viewBox="0 0 60 18"><path d="M4 12c8-10 16-10 26-4s18 4 26-4"/></svg>',
@@ -650,6 +656,7 @@ function openToolSettings(kind, btn) {
     if (kind === 'hl') extra = `<div class="seg"><button data-straight="0" aria-pressed="${!cfg.straight}">Freehand</button><button data-straight="1" aria-pressed="${!!cfg.straight}">Straight lines</button></div>`;
     if (kind === 'eraser') extra = `<div class="seg"><button data-mode="stroke" aria-pressed="${cfg.mode === 'stroke'}">Whole stroke</button><button data-mode="partial" aria-pressed="${cfg.mode === 'partial'}">Partial</button></div>
       <div class="ctl"><div class="ctl-top"><span>Size</span><b><span data-val="esize">${cfg.size}</span></b></div><input type="range" id="r-eraser-size" data-k="size" min="1" max="5" step="1" value="${cfg.size}" aria-label="Eraser size"></div>`;
+    if (kind === 'shape') extra = `<div class="seg" style="grid-auto-flow:row;grid-template-columns:repeat(4,1fr)">${SHAPES.map(([k, l]) => `<button data-shape="${k}" aria-pressed="${cfg.kind === k}">${l}</button>`).join('')}</div>`;
     if (kind === 'text') extra = `<div class="ctl"><div class="ctl-top"><span>Text size</span><b><span data-val="tsize">${cfg.size}</span></b></div><input type="range" id="r-text-size" data-k="size" min="12" max="96" step="2" value="${cfg.size}" aria-label="Text size"></div>`;
     const pal = cfg.color ? `<hr><div class="pal-head"><span>Color</span><button class="rainbow" data-pick aria-label="Custom color">+</button></div>
       <div class="pal">${prefs.palette.map((c) => `<button data-col="${c}" style="--c:${c}" aria-label="${c}" aria-pressed="${c.toLowerCase() === cfg.color.toLowerCase()}"></button>`).join('')}<button class="addc" data-pick aria-label="Add a color">+</button></div>` : '';
@@ -682,12 +689,38 @@ function openToolSettings(kind, btn) {
     if (b.dataset.style) cfg.style = b.dataset.style;
     if (b.dataset.straight) cfg.straight = b.dataset.straight === '1';
     if (b.dataset.mode) cfg.mode = b.dataset.mode;
+    if (b.dataset.shape) cfg.kind = b.dataset.shape;
     if (b.dataset.col) { cfg.color = b.dataset.col; applyColorToEditing(); }
     if (b.dataset.pick !== undefined) { openPicker(el, cfg.color, (hex) => { if (!prefs.palette.includes(hex)) prefs.palette.push(hex); cfg.color = hex; savePrefs(); applyColorToEditing(); render(); buildRail(); }); return; }
     savePrefs(); render(); buildRail();
   });
   render();
   place(el, btn.getBoundingClientRect(), 'right');
+}
+const SHAPES = [['line', 'Line'], ['arrow', 'Arrow'], ['rect', 'Box'], ['oval', 'Oval'], ['tri', 'Triangle'], ['diamond', 'Diamond'], ['star', 'Star']];
+function shapeStroke(kind, a, b, size) {
+  const [x0, y0] = a, [x1, y1] = b, L = Math.min(x0, x1), R = Math.max(x0, x1), Tp = Math.min(y0, y1), B = Math.max(y0, y1), cx = (L + R) / 2, cy = (Tp + B) / 2;
+  let poly, closed = true;
+  if (kind === 'line') { poly = [[x0, y0], [x1, y1]]; closed = false; }
+  else if (kind === 'arrow') {
+    const ang = Math.atan2(y1 - y0, x1 - x0), hl = Math.min(46, Math.hypot(x1 - x0, y1 - y0) * .35), sp = .5;
+    poly = [[x0, y0], [x1, y1], [x1 - hl * Math.cos(ang - sp), y1 - hl * Math.sin(ang - sp)], [x1, y1], [x1 - hl * Math.cos(ang + sp), y1 - hl * Math.sin(ang + sp)]]; closed = false;
+  }
+  else if (kind === 'rect') poly = [[L, Tp], [R, Tp], [R, B], [L, B]];
+  else if (kind === 'tri') poly = [[cx, Tp], [R, B], [L, B]];
+  else if (kind === 'diamond') poly = [[cx, Tp], [R, cy], [cx, B], [L, cy]];
+  else if (kind === 'star') { poly = []; for (let i = 0; i < 10; i++) { const r = i % 2 ? .42 : 1, an = -Math.PI / 2 + i * Math.PI / 5; poly.push([cx + (R - L) / 2 * r * Math.cos(an), cy + (B - Tp) / 2 * r * Math.sin(an)]); } }
+  const pts = [];
+  if (kind === 'oval') { const n = 96; for (let i = 0; i <= n; i++) { const t = i / n * Math.PI * 2; pts.push(+(cx + (R - L) / 2 * Math.cos(t)).toFixed(1), +(cy + (B - Tp) / 2 * Math.sin(t)).toFixed(1), .5); } }
+  else {
+    const ring = closed ? poly.concat([poly[0]]) : poly;
+    for (let i = 0; i < ring.length - 1; i++) {
+      const [ax, ay] = ring[i], [bx, by] = ring[i + 1], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 10));
+      for (let k = 0; k < n; k++) pts.push(+(ax + (bx - ax) * k / n).toFixed(1), +(ay + (by - ay) * k / n).toFixed(1), .5);
+    }
+    const last = ring[ring.length - 1]; pts.push(+last[0].toFixed(1), +last[1].toFixed(1), .5);
+  }
+  return { tool: 'ball', color: T.shape.color, w: size * 3, op: 1, style: 'solid', pts };
 }
 function makeStrokeTemplate(kind) {
   const c = T[kind];
@@ -861,6 +894,7 @@ function renderLive() {
     drawContent(c, { images: sel.images, strokes: sel.strokes, texts: sel.texts });
     c.restore();
   }
+  if (action && action.type === 'shape' && action.st) drawStroke(c, action.st, true);
   if (action && action.type === 'draw') {
     drawStroke(c, action.st, true);
     if (action.pred && action.pred.length) drawStroke(c, { ...action.st, ts: false, pts: action.st.pts.slice(-3).concat(action.pred) }, true);
@@ -951,11 +985,15 @@ $('#emore').onclick = (e) => {
   if (nb) { const v = visPage(); if (v !== pageIdx) { commitText(); clearSel(); pageIdx = v; } }   // menu acts on the page shown in the counter
   popover(e.currentTarget, `
     <button class="row" data-a="clear">${ic('eraser')}<span>${nb ? 'Clear this page' : 'Clear whiteboard'}</span></button>
+    <hr><button class="row" data-a="paste">${ic('image')}<span>Paste image<small>From the clipboard</small></span></button>
+    <button class="row" data-a="weblink">${ic('image')}<span>Image from web link<small>Paste an address</small></span></button>
     <hr><button class="row" data-a="pdf">${ic('paper')}<span>Export as PDF<small>${nb ? 'All pages' : 'Whole board'}</small></span></button>
     <button class="row" data-a="png">${ic('image')}<span>Export as image (PNG)<small>${nb ? 'Current page' : 'Whole board'}</small></span></button>
     <button class="row" data-a="json">${ic('notebook')}<span>Backup file (.json)<small>Re-importable data</small></span></button><hr>
     ${nb ? `<button class="row danger" data-a="delpage">${ic('trash')}<span>Delete page ${pageIdx + 1}</span></button>` : ''}`,
   (a, b) => {
+    if (a === 'paste') { closeOverlay(); pasteFromClipboard(); return; }
+    if (a === 'weblink') { closeOverlay(); linkSheet(); return; }
     if (a === 'pdf' || a === 'png' || a === 'json') { closeOverlay(); exportNote(a); return; }
     if (a === 'clear') { commitText(); clearSel(); pushUndo(snap()); Object.assign(page(), blankPage()); closeOverlay(); renderBase(); renderLive(); scheduleSave(); toast('Cleared · Undo brings it back'); }
     if (a === 'delpage') {
@@ -1367,6 +1405,7 @@ live.addEventListener('pointerdown', (e) => {
     else pushRaw(e);
     armStraighten(pt); queueLive(); return;
   }
+  if (toolKind === 'shape') { action = { type: 'shape', id: e.pointerId, pointerType: e.pointerType, start: w, end: w, st: null }; return; }
   if (toolKind === 'eraser') {
     action = { type: 'erase', id: e.pointerId, pointerType: e.pointerType, before: snap(), changed: false, prev: w };
     eraserAt = w; eraseAt(w, w); queueLive(); return;
@@ -1391,6 +1430,7 @@ live.addEventListener('pointermove', (e) => {
   if (!action || e.pointerId !== action.id) return;
   const pt = local(e), w = toWorld(pt);
   const a = action;
+  if (a.type === 'shape') { a.end = w; a.st = shapeStroke(T.shape.kind, a.start, w, T.shape.size); queueLive(); return; }
   if (a.type === 'imgtap') a.moved = Math.max(a.moved, Math.hypot(pt[0] - a.startScr[0], pt[1] - a.startScr[1]));
   if (a.type === 'draw') {
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
@@ -1447,6 +1487,9 @@ function endPointer(e) {
       pushUndo(snap()); page().strokes.push(a.st); renderBase(); scheduleSave();
     }
     a.pred = null; renderLive();
+  } else if (a.type === 'shape') {
+    if (e.type !== 'pointercancel' && a.st && Math.hypot(a.end[0] - a.start[0], a.end[1] - a.start[1]) * view.s > 8) { pushUndo(snap()); page().strokes.push(a.st); renderBase(); scheduleSave(); }
+    renderLive();
   } else if (a.type === 'erase') { eraserAt = null; if (a.changed) { pushUndo(a.before); scheduleSave(); } renderLive(); }
   else if (a.type === 'pan') persistView();
   else if (a.type === 'lasso') {
@@ -1470,8 +1513,8 @@ live.addEventListener('wheel', (e) => {
 
 /* ================= images ================= */
 let pendingNewFromPhoto = false;
-const tapTool = () => toolKind === 'image' || toolKind === 'bucket';
-function tapAt(pt) { if (toolKind === 'image') placeImageAt(pt); else { activatePageAt(pt); bucketFill(toWorld(pt)); } }
+const tapTool = () => toolKind === 'bucket';
+function tapAt(pt) { activatePageAt(pt); bucketFill(toWorld(pt)); }
 /* paint bucket: rasterise the lines, flood the tapped area, keep the result as an image under the ink */
 function bucketFill(w) {
   commitText(); clearSel();
@@ -1535,15 +1578,9 @@ function bucketFill(w) {
   renderBase(); renderLive(); scheduleSave();
 }
 let pendingPlace = null;
-function placeImageAt(pt) {
-  activatePageAt(pt); pendingPlace = { pi: pageIdx, w: toWorld(pt) };
-  const r = stage.getBoundingClientRect(), f = $('#file');   // the system picker menu anchors to this input, so park it on the tap
-  f.style.left = (r.left + pt[0] - 24) + 'px'; f.style.top = (r.top + pt[1] - 24) + 'px';
-  pickImage(false, true);
-}
+function setPlaceAt(pt) { activatePageAt(pt); pendingPlace = { pi: pageIdx, w: toWorld(pt) }; }
 function pickImage(asNew, keepPlace) { if (!keepPlace) { pendingPlace = null; const f0 = $('#file'); f0.style.left = '50%'; f0.style.top = '40%'; } pendingNewFromPhoto = asNew; const f = $('#file'); f.value = ''; f.click(); }
-$('#file').addEventListener('change', () => {
-  const file = $('#file').files[0]; if (!file) return;
+function importImageBlob(blob, done) {
   const rd = new FileReader();
   rd.onload = () => {
     const im = new Image();
@@ -1551,14 +1588,61 @@ $('#file').addEventListener('change', () => {
       const k = Math.min(1, 1800 / Math.max(im.width, im.height));
       const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
       c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-      const data = { src: c.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', .86), w: c.width, h: c.height };
-      if (pendingNewFromPhoto) newSheet('notebook', data);
-      else { const g = getImg(data.src); const go = () => insertImage(data); if (g.complete && g.naturalWidth) go(); else g.addEventListener('load', go, { once: true }); }
+      const data = { src: c.toDataURL(blob.type === 'image/png' ? 'image/png' : 'image/jpeg', .86), w: c.width, h: c.height };
+      const g = getImg(data.src), go = () => done(data);
+      if (g.complete && g.naturalWidth) go(); else g.addEventListener('load', go, { once: true });
     };
     im.onerror = () => toast('That file could not be opened as an image');
     im.src = rd.result;
   };
-  rd.readAsDataURL(file);
+  rd.readAsDataURL(blob);
+}
+$('#file').addEventListener('change', () => {
+  const file = $('#file').files[0]; if (!file) return;
+  importImageBlob(file, (data) => { if (pendingNewFromPhoto) newSheet('notebook', data); else insertImage(data); });
+});
+async function importImageURL(url) {
+  toast('Loading image…');
+  try {
+    const r = await fetch(url); if (!r.ok) throw 0;
+    const blob = await r.blob(); if (!blob.type.startsWith('image/')) throw 0;
+    importImageBlob(blob, insertImage);
+  } catch (e) { toast("Couldn't get that image · long-press it in Safari, tap Copy, then Paste image"); }
+}
+async function pasteFromClipboard() {
+  try {
+    for (const it of await navigator.clipboard.read()) {
+      const t = it.types.find((x) => x.startsWith('image/'));
+      if (t) { importImageBlob(await it.getType(t), insertImage); return; }
+      if (it.types.includes('text/plain')) { const txt = (await (await it.getType('text/plain')).text()).trim(); if (/^(https?:|data:image)/.test(txt)) { importImageURL(txt); return; } }
+    }
+    toast('No image in the clipboard');
+  } catch (e) { toast('Copy an image first (long-press it → Copy), then try again'); }
+}
+function linkSheet() {
+  const s = sheet(`<h2>Image from the web</h2><div><label for="iu">Image address</label><input type="url" id="iu" placeholder="https://…" autocapitalize="none" autocorrect="off" spellcheck="false"></div>
+    <div class="actions"><button class="btn ghost" data-x>Cancel</button><button class="btn primary" data-go>Add image</button></div>`);
+  const inp = s.querySelector('#iu'); setTimeout(() => inp.focus(), 30);
+  const go = () => { const u = inp.value.trim(); if (!u) return; closeOverlay(); importImageURL(u); };
+  s.onclick = (e) => { if (e.target.closest('[data-x]')) closeOverlay(); if (e.target.closest('[data-go]')) go(); };
+  inp.onkeydown = (e) => { if (e.key === 'Enter') go(); };
+}
+document.addEventListener('paste', (e) => {
+  if (!cur || $('#editor').hidden) return;
+  const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  const cd = e.clipboardData; if (!cd) return;
+  for (const it of cd.items) if (it.kind === 'file' && it.type.startsWith('image/')) { e.preventDefault(); importImageBlob(it.getAsFile(), insertImage); return; }
+  const txt = cd.getData('text/plain').trim(), html = cd.getData('text/html'), m = html && html.match(/<img[^>]+src=["']([^"']+)/i);
+  if (/^https?:\/\/\S+$/.test(txt)) { e.preventDefault(); importImageURL(txt); } else if (m) { e.preventDefault(); importImageURL(m[1]); }
+});
+stage.addEventListener('dragover', (e) => e.preventDefault());
+stage.addEventListener('drop', (e) => {
+  e.preventDefault(); if (!cur) return;
+  setPlaceAt(local(e));
+  const f = [...(e.dataTransfer.files || [])].find((x) => x.type.startsWith('image/'));
+  if (f) { importImageBlob(f, insertImage); return; }
+  const u = (e.dataTransfer.getData('text/uri-list') || '').split('\n')[0].trim(), html = e.dataTransfer.getData('text/html'), m = html && html.match(/<img[^>]+src=["']([^"']+)/i);
+  if (m || u) importImageURL(m ? m[1] : u);
 });
 function insertImage({ src, w, h }) {
   commitText(); clearSel();
@@ -1568,7 +1652,7 @@ function insertImage({ src, w, h }) {
   const ww = Math.min(maxW, w), hh = ww * h / w;
   let cx, cy;
   if (place) [cx, cy] = place.w;
-  else if (nb) { cx = PAGE.w / 2; cy = Math.min(PAGE.h / 2, 120 + hh / 2); } else [cx, cy] = toWorld([W / 2, H / 2]);
+  else { activatePageAt([W / 2, H / 2]); [cx, cy] = toWorld([W / 2, H / 2]); }
   if (nb) { cx = clamp(cx, ww / 2, Math.max(ww / 2, PAGE.w - ww / 2)); cy = clamp(cy, hh / 2, Math.max(hh / 2, PAGE.h - hh / 2)); }
   pushUndo(snap());
   const o = { id: uid(), src, x: cx - ww / 2, y: cy - hh / 2, w: ww, h: hh };
