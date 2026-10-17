@@ -138,6 +138,13 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 #stage{position:absolute;inset:0;touch-action:none}
 #stage canvas{position:absolute;inset:0;width:100%;height:100%}
 #live{touch-action:none}
+#stage.drop{outline:3px dashed var(--accent);outline-offset:-6px}
+.gal{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;max-height:46vh;overflow:auto;-webkit-overflow-scrolling:touch}
+.gal button{padding:0;border:0;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg)}
+.gal img{width:100%;height:100%;object-fit:cover;display:block}
+.srow{display:flex;gap:8px;margin-top:8px}
+.srow input{flex:1;min-width:0;font:inherit;font-size:16px;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+.sheet .note{font-size:12px;color:var(--muted);margin-top:10px}
 #file{position:fixed;left:50%;top:40%;width:48px;height:48px;border-radius:12px;opacity:0;pointer-events:none;z-index:-1}
 #ted{position:absolute;z-index:4;margin:0;padding:0;border:0;outline:1.5px dashed var(--accent);outline-offset:6px;border-radius:2px;background:transparent;resize:none;overflow:hidden;line-height:1.3;font-family:var(--f-body);white-space:pre-wrap;transform-origin:0 0;user-select:text;-webkit-user-select:text}
 .topbar{position:absolute;z-index:5;top:calc(10px + env(safe-area-inset-top,0px));left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));display:flex;gap:10px;align-items:center;pointer-events:none;flex-wrap:wrap}
@@ -263,6 +270,7 @@ const I = {
   bucket: '<path d="M5 12l7-7 7 7-6.5 6.5a2 2 0 0 1-2.8 0z"/><path d="M12 5L9.5 2.5M20 15c1.2 1.6 1.5 2.4 1.5 3.2a1.5 1.5 0 0 1-3 0c0-.8.3-1.6 1.5-3.2z"/>',
   image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   notebook: '<path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M6 3v18M10 8h5"/>',
   board: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21l4-4 4 4"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'
@@ -603,8 +611,19 @@ $('#rail').addEventListener('click', (e) => {
     if (T[k] && !prefs.hintShown) { prefs.hintShown = true; savePrefs(); toast('Tap the tool again to change its settings'); }
   }
   if (e.target.closest('[data-img]')) {   // park the hidden input on the button so the system menu opens beside the rail
-    const r = e.target.closest('[data-img]').getBoundingClientRect(), f = $('#file');
-    f.style.left = r.left + 'px'; f.style.top = r.top + 'px'; pickImage(false); return;
+    const btn = e.target.closest('[data-img]'), r = btn.getBoundingClientRect();
+    const pop = popover(btn, `
+      <button class="row" data-a="library">${ic('image')}<span>Photos &amp; Files<small>Library, camera or a file</small></span></button>
+      <button class="row" data-a="search">${ic('search')}<span>Search the web<small>Find an image and add it</small></span></button>
+      <button class="row" data-a="paste">${ic('image')}<span>Paste image<small>From the clipboard</small></span></button>
+      <button class="row" data-a="weblink">${ic('image')}<span>From a web link</span></button>`,
+    (a, b) => {
+      pendingPlace = null;
+      if (a === 'library') { const rb = b.getBoundingClientRect(), f = $('#file'); f.style.left = rb.left + 'px'; f.style.top = rb.top + 'px'; closeOverlay(); pickImage(false); return; }
+      closeOverlay();
+      if (a === 'search') searchSheet(); if (a === 'paste') pasteFromClipboard(); if (a === 'weblink') linkSheet();
+    });
+    place(pop, r, 'right'); return;
   }
   if (c) { const ct = colorTool() || (setTool('fountain'), 'fountain'); T[ct].color = c.dataset.c; savePrefs(); applyColorToEditing(); buildRail(); }
 });
@@ -1435,7 +1454,14 @@ function armStraighten(pt) {
 
 live.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  const pt = local(e);
+  const pt = local(e); lpFired = false;
+  if (e.pointerType === 'touch' && toolKind !== 'text') {
+    clearLP(); const cx = e.clientX, cy = e.clientY;
+    lp = { id: e.pointerId, pt, t: setTimeout(() => {
+      if (!lp || touches.size > 1 || !cur) return;
+      lpFired = true; lp = null; gesture = null; cancelAction(); showPressMenu(pt, cx, cy);
+    }, 650) };
+  } else clearLP();
   if (e.pointerType === 'pen' && !penSeen) { penSeen = true; if (!prefs.touched && !pencilOnly) { setPencilOnly(true); toast('Pencil detected · fingers now move and zoom the page'); } }
   if (e.pointerType === 'touch') {
     if (action && action.pointerType === 'pen') return;                     // palm rejection
@@ -1479,6 +1505,7 @@ live.addEventListener('pointerdown', (e) => {
   if (toolKind === 'text') { action = { type: 'text', id: e.pointerId, pointerType: e.pointerType, w }; }
 });
 live.addEventListener('pointermove', (e) => {
+  if (lp && e.pointerId === lp.id) { const q = local(e); if (Math.hypot(q[0] - lp.pt[0], q[1] - lp.pt[1]) > 10) clearLP(); }
   if (e.pointerType === 'touch' && touches.has(e.pointerId)) {
     touches.set(e.pointerId, local(e));
     if (gesture) { moveGesture(); return; }
@@ -1521,6 +1548,8 @@ live.addEventListener('pointermove', (e) => {
   }
 });
 function endPointer(e) {
+  clearLP();
+  if (lpFired) { touches.delete(e.pointerId); gesture = null; action = null; tapInfo = null; lpFired = false; return; }
   if (e.pointerType === 'touch' && touches.has(e.pointerId)) {
     touches.delete(e.pointerId);
     if (gesture) {
@@ -1556,6 +1585,7 @@ function endPointer(e) {
   else if (a.type === 'imgtap') { if (e.type !== 'pointercancel' && a.moved < 10) tapAt(a.startScr); }
   else if (a.type === 'text' && e.type !== 'pointercancel') { commitText(); startText(a.w); }
 }
+live.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!cur) return; const r = stage.getBoundingClientRect(); showPressMenu([e.clientX - r.left, e.clientY - r.top], e.clientX, e.clientY); });
 live.addEventListener('pointerup', endPointer);
 live.addEventListener('pointercancel', endPointer);
 live.addEventListener('wheel', (e) => {
@@ -1657,10 +1687,11 @@ $('#file').addEventListener('change', () => {
   const file = $('#file').files[0]; if (!file) return;
   importImageBlob(file, (data) => { if (pendingNewFromPhoto) newSheet('notebook', data); else insertImage(data); });
 });
-async function importImageURL(url) {
+async function importImageURL(url, fallback) {
   toast('Loading image…');
   try {
-    const r = await fetch(url); if (!r.ok) throw 0;
+    let r;
+    try { r = await fetch(url); if (!r.ok) throw 0; } catch (e) { if (!fallback) throw e; r = await fetch(fallback); if (!r.ok) throw 0; }
     const blob = await r.blob(); if (!blob.type.startsWith('image/')) throw 0;
     importImageBlob(blob, insertImage);
   } catch (e) { toast("Couldn't get that image · long-press it in Safari, tap Copy, then Paste image"); }
@@ -1673,7 +1704,49 @@ async function pasteFromClipboard() {
       if (it.types.includes('text/plain')) { const txt = (await (await it.getType('text/plain')).text()).trim(); if (/^(https?:|data:image)/.test(txt)) { importImageURL(txt); return; } }
     }
     toast('No image in the clipboard');
-  } catch (e) { toast('Copy an image first (long-press it → Copy), then try again'); }
+  } catch (e) { pendingPlace = null; toast('Copy an image first (long-press it → Copy), then try again'); }
+}
+let searchState = { q: '', page: 1 };
+function searchSheet() {
+  const s = sheet(`<h2>Search images</h2>
+    <div class="srow"><input type="search" id="sq" placeholder="Search the web for images" enterkeyhint="search" autocapitalize="none" autocorrect="off" spellcheck="false"><button class="btn primary" data-go>Search</button></div>
+    <div class="gal" id="sres" hidden></div><div class="note" id="smsg">Free-to-use pictures from Openverse. Tap one to add it to your note.</div>
+    <div class="actions" style="margin-top:12px"><button class="btn ghost" data-more hidden>More</button><button class="btn ghost" data-x>Close</button></div>`);
+  s.style.width = 'min(640px,calc(100vw - 32px))'; s.style.maxHeight = '88vh'; s.style.overflow = 'auto';
+  const inp = s.querySelector('#sq'), res = s.querySelector('#sres'), msg = s.querySelector('#smsg'), more = s.querySelector('[data-more]'), items = new Map();
+  setTimeout(() => inp.focus(), 40);
+  async function run(page) {
+    const q = inp.value.trim(); if (!q) return;
+    if (page === 1) { res.innerHTML = ''; items.clear(); }
+    msg.textContent = 'Searching…'; more.hidden = true;
+    try {
+      const r = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=18&page=${page}&mature=false`);
+      if (!r.ok) throw 0; const d = await r.json();
+      for (const it of d.results) { if (items.has(it.id)) continue; items.set(it.id, it); res.insertAdjacentHTML('beforeend', `<button data-id="${it.id}" aria-label="${esc(it.title || 'image')}"><img loading="lazy" alt="" src="${it.thumbnail}"></button>`); }
+      res.hidden = !items.size; searchState = { q, page };
+      msg.textContent = items.size ? 'Free-to-use pictures from Openverse · tap one to add it' : 'No images found. Try different words.';
+      more.hidden = !d.results.length || page >= d.page_count;
+    } catch (e) { msg.textContent = 'Search is not available right now. Check your connection and try again.'; }
+  }
+  s.onclick = (e) => {
+    if (e.target.closest('[data-x]')) closeOverlay();
+    if (e.target.closest('[data-go]')) run(1);
+    if (e.target.closest('[data-more]')) run(searchState.page + 1);
+    const b = e.target.closest('[data-id]'); if (b) { const it = items.get(b.dataset.id); closeOverlay(); importImageURL(it.url, it.thumbnail); }
+  };
+  inp.onkeydown = (e) => { if (e.key === 'Enter') run(1); };
+}
+/* press and hold (or right click) anywhere on the page for a quick add-image menu at that spot */
+let lp = null, lpFired = false;
+function clearLP() { if (lp) { clearTimeout(lp.t); lp = null; } }
+function showPressMenu(pt, cx, cy) {
+  const anchor = { getBoundingClientRect: () => ({ left: cx, top: cy, right: cx, bottom: cy, width: 0, height: 0 }) };
+  popover(anchor, `<button class="row" data-a="paste">${ic('image')}<span>Paste image</span></button>
+    <button class="row" data-a="search">${ic('search')}<span>Search the web</span></button>
+    <button class="row" data-a="weblink">${ic('image')}<span>From a web link</span></button>`, (a) => {
+    closeOverlay(); setPlaceAt(pt);
+    if (a === 'paste') pasteFromClipboard(); if (a === 'search') searchSheet(); if (a === 'weblink') linkSheet();
+  });
 }
 function linkSheet() {
   const s = sheet(`<h2>Image from the web</h2><div><label for="iu">Image address</label><input type="url" id="iu" placeholder="https://…" autocapitalize="none" autocorrect="off" spellcheck="false"></div>
@@ -1691,9 +1764,10 @@ document.addEventListener('paste', (e) => {
   const txt = cd.getData('text/plain').trim(), html = cd.getData('text/html'), m = html && html.match(/<img[^>]+src=["']([^"']+)/i);
   if (/^https?:\/\/\S+$/.test(txt)) { e.preventDefault(); importImageURL(txt); } else if (m) { e.preventDefault(); importImageURL(m[1]); }
 });
-stage.addEventListener('dragover', (e) => e.preventDefault());
+['dragenter', 'dragover'].forEach((ev) => stage.addEventListener(ev, (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; stage.classList.add('drop'); }));
+stage.addEventListener('dragleave', (e) => { if (e.target === stage || e.target === live) stage.classList.remove('drop'); });
 stage.addEventListener('drop', (e) => {
-  e.preventDefault(); if (!cur) return;
+  e.preventDefault(); stage.classList.remove('drop'); if (!cur) return;
   setPlaceAt(local(e));
   const f = [...(e.dataTransfer.files || [])].find((x) => x.type.startsWith('image/'));
   if (f) { importImageBlob(f, insertImage); return; }
