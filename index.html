@@ -18,7 +18,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Onest:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Onest:wght@400;500;600&family=Caveat:wght@500;600&family=Dancing+Script:wght@500;600&family=Kalam:wght@400;700&display=swap">
 <style>
 /* base reset */
 *,*::before,*::after{box-sizing:border-box}
@@ -145,6 +145,11 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 #stage.drop{outline:3px dashed var(--accent);outline-offset:-6px}
 .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));grid-auto-rows:128px;gap:10px;align-content:start;margin-top:12px;height:min(58vh,620px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .gal[hidden]{display:none}
+.fontgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.fontgrid button{display:grid;gap:2px;justify-items:center;padding:10px 6px;border-radius:12px;background:var(--panel);border:1.5px solid transparent;color:var(--ink)}
+.fontgrid button span{font-size:22px;line-height:1.15}
+.fontgrid button small{font-family:var(--f-body);font-size:11px;color:var(--muted)}
+.fontgrid button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
 .shp{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .shp button{aspect-ratio:1.15;border-radius:12px;background:var(--panel);border:1.5px solid transparent;display:grid;place-items:center;color:var(--ink)}
 .shp button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
@@ -269,9 +274,10 @@ const DEFAULTS = {
   eraser: { mode: 'stroke', size: 2 },
   text: { size: 28, color: '#111418' },
   shape: { kind: 'rect', size: 1, color: '#111418' },
+  magic: { size: 1, color: '#111418', font: 'Caveat', lang: 'auto', shapes: true, text: true },
   bucket: { color: '#3b78e7' }
 };
-const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas', select: 'Select & move', image: 'Image', bucket: 'Fill bucket', shape: 'Shapes' };
+const TOOL_NAMES = { fountain: 'Fountain pen', ball: 'Ballpoint pen', hl: 'Highlighter', eraser: 'Eraser', lasso: 'Lasso', text: 'Text', hand: 'Move canvas', select: 'Select & move', magic: 'Magic pen', image: 'Image', bucket: 'Fill bucket', shape: 'Shapes' };
 
 const I = {
   back: '<path d="M15 5l-7 7 7 7"/>',
@@ -293,6 +299,7 @@ const I = {
   bucket: '<path d="M5 12l7-7 7 7-6.5 6.5a2 2 0 0 1-2.8 0z"/><path d="M12 5L9.5 2.5M20 15c1.2 1.6 1.5 2.4 1.5 3.2a1.5 1.5 0 0 1-3 0c0-.8.3-1.6 1.5-3.2z"/>',
   image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  magic: '<path d="M4 20l1.6-4.6L15.2 5.8l3 3-9.6 9.6z"/><path d="M13.4 7.6l3 3"/><path d="M19.5 2.5v4M17.5 4.5h4M6 3v3M4.5 4.5h3"/>',
   select: '<path d="M6 3.5l12.5 6.2-5.3 1.7-1.9 5.3z"/><path d="M13.4 12.8l4.3 4.3"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
   notebook: '<path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M6 3v18M10 8h5"/>',
@@ -346,7 +353,8 @@ let editing = null;   // text being edited
 const imgCache = new Map();
 if (!T.bucket) T.bucket = { color: '#3b78e7' };
 if (!T.shape) T.shape = { kind: 'rect', size: 1, color: '#111418' };
-const colorTool = () => (['fountain', 'ball', 'hl', 'text', 'bucket', 'shape'].includes(toolKind) ? toolKind : null);
+if (!T.magic) T.magic = { ...DEFAULTS.magic };
+const colorTool = () => (['fountain', 'ball', 'hl', 'text', 'bucket', 'shape', 'magic'].includes(toolKind) ? toolKind : null);
 
 /* ================= ink engine ================= */
 const ease = (x) => (x >= 1 ? 1 : x <= 0 ? 0 : 1 - (1 - x) * (1 - x));
@@ -414,9 +422,9 @@ function drawStroke(c, st, live) {
 
 /* text */
 const mctx = document.createElement('canvas').getContext('2d');
-const fontFor = (size) => `${size}px Onest, system-ui, -apple-system, sans-serif`;
+const fontFor = (size, f) => `${size}px ${f && f !== 'Onest' ? `"${f}", ` : ''}Onest, system-ui, -apple-system, sans-serif`;
 function wrapText(t) {
-  mctx.font = fontFor(t.size); const out = [];
+  mctx.font = fontFor(t.size, t.font); const out = [];
   for (const para of t.text.split('\n')) {
     let line = '';
     for (const word of para.split(/(\s+)/)) {
@@ -429,7 +437,7 @@ function wrapText(t) {
 }
 const textH = (t) => wrapText(t).length * t.size * 1.3;
 function drawText(c, t) {
-  c.save(); c.font = fontFor(t.size); c.fillStyle = t.color; c.textBaseline = 'top';
+  c.save(); c.font = fontFor(t.size, t.font); c.fillStyle = t.color; c.textBaseline = 'top';
   wrapText(t).forEach((l, i) => c.fillText(l, t.x, t.y + i * t.size * 1.3 + t.size * .12));
   c.restore();
 }
@@ -618,7 +626,7 @@ let W = 0, H = 0, dpr = 1;
 $('#paperbtn').innerHTML = ic('paper'); $('#fit').innerHTML = ic('fit'); $('#emore').innerHTML = ic('more');
 
 function buildRail() {
-  const tools = ['fountain', 'ball', 'hl', 'eraser', 'select', 'lasso', 'shape', 'text', 'bucket', 'hand'];
+  const tools = ['fountain', 'ball', 'hl', 'magic', 'eraser', 'select', 'lasso', 'shape', 'text', 'bucket', 'hand'];
   const ct = colorTool(), cc = ct ? T[ct].color : null;
   $('#rail').innerHTML =
     tools.map((k) => `<button class="ib" data-t="${k}" aria-label="${TOOL_NAMES[k]}" title="${TOOL_NAMES[k]}${T[k] ? ' · tap again for settings' : ''}" aria-pressed="${toolKind === k}">${ic(k)}${T[k] && T[k].color ? `<i class="dot" style="--c:${T[k].color}"></i>` : ''}</button>`).join('') +
@@ -653,6 +661,7 @@ $('#rail').addEventListener('click', (e) => {
 });
 let prevDrawTool = 'fountain', afterInsert = false;
 function setTool(k) {
+  if (k !== 'magic') magicFlush();
   if (['fountain', 'ball', 'hl'].includes(k)) prevDrawTool = k; afterInsert = false;
   if (k !== 'text') commitText();
   if (k !== 'lasso' && k !== 'select') clearSel();
@@ -673,7 +682,7 @@ const TOOL_CTRLS = {
   fountain: ['stab', 'tip', 'sens', 'size', 'op'],
   ball: ['stab', 'size', 'op'],
   hl: ['size', 'op'],
-  eraser: [], text: [], bucket: [], shape: ['size']
+  eraser: [], text: [], bucket: [], shape: ['size'], magic: ['size']
 };
 const LINE_SVG = {
   solid: '<svg viewBox="0 0 60 18"><path d="M4 12c8-10 16-10 26-4s18 4 26-4"/></svg>',
@@ -702,6 +711,12 @@ function openToolSettings(kind, btn) {
     if (kind === 'eraser') extra = `<div class="seg"><button data-mode="stroke" aria-pressed="${cfg.mode === 'stroke'}">Whole stroke</button><button data-mode="partial" aria-pressed="${cfg.mode === 'partial'}">Partial</button></div>
       <div class="ctl"><div class="ctl-top"><span>Size</span><b><span data-val="esize">${cfg.size}</span></b></div><input type="range" id="r-eraser-size" data-k="size" min="1" max="20" step="1" value="${cfg.size}" aria-label="Eraser size"></div>`;
     if (kind === 'shape') extra = `<div class="shp">${SHAPES.map(([k, l]) => `<button data-shape="${k}" aria-label="${l}" title="${l}" aria-pressed="${cfg.kind === k}">${shapeIcon(k)}</button>`).join('')}</div><button class="libbtn" data-lib>Icons, stickers &amp; emoji…</button>`;
+    if (kind === 'magic') extra = `<div class="ctl-top" style="margin-top:6px"><span>Writing style<small>Handwriting is turned into this</small></span></div>
+      <div class="fontgrid">${MAGIC_FONTS.map(([f, l]) => `<button data-font="${f}" aria-pressed="${cfg.font === f}" style="font-family:'${f}',Onest,sans-serif"><span>Hello, notes</span><small>${l}</small></button>`).join('')}</div>
+      <div class="seg" style="margin-top:12px"><button data-tog="text" aria-pressed="${cfg.text}">Writing → text</button><button data-tog="shapes" aria-pressed="${cfg.shapes}">Perfect shapes</button></div>
+      <div class="ctl-top" style="margin-top:12px"><span>Language</span></div>
+      <div class="seg" style="grid-auto-flow:row;grid-template-columns:repeat(4,1fr)">${MAGIC_LANGS.map(([k, l]) => `<button data-lang="${k}" aria-pressed="${cfg.lang === k}">${l}</button>`).join('')}</div>
+      <div class="hint">Write or draw, then pause for a second. Writing is read by Google's handwriting recognition, so it needs internet and is sent to Google. Undo brings back what you drew.</div>`;
     if (kind === 'text') extra = `<div class="ctl"><div class="ctl-top"><span>Text size</span><b><span data-val="tsize">${cfg.size}</span></b></div><input type="range" id="r-text-size" data-k="size" min="12" max="96" step="2" value="${cfg.size}" aria-label="Text size"></div>`;
     const pal = cfg.color ? `<hr><div class="pal-head"><span>Color</span><button class="rainbow" data-pick aria-label="Custom color">+</button></div>
       <div class="pal">${prefs.palette.map((c) => `<button data-col="${c}" style="--c:${c}" aria-label="${c}" aria-pressed="${c.toLowerCase() === cfg.color.toLowerCase()}"></button>`).join('')}<button class="addc" data-pick aria-label="Add a color">+</button></div>` : '';
@@ -735,6 +750,9 @@ function openToolSettings(kind, btn) {
     if (b.dataset.style) cfg.style = b.dataset.style;
     if (b.dataset.straight) cfg.straight = b.dataset.straight === '1';
     if (b.dataset.mode) cfg.mode = b.dataset.mode;
+    if (b.dataset.font) cfg.font = b.dataset.font;
+    if (b.dataset.tog) cfg[b.dataset.tog] = !cfg[b.dataset.tog];
+    if (b.dataset.lang) cfg.lang = b.dataset.lang;
     if (b.dataset.shape) cfg.kind = b.dataset.shape;
     if (b.dataset.col) { cfg.color = b.dataset.col; applyColorToEditing(); }
     if (b.dataset.pick !== undefined) { openPicker(el, cfg.color, (hex) => { if (!prefs.palette.includes(hex)) prefs.palette.push(hex); cfg.color = hex; savePrefs(); applyColorToEditing(); render(); buildRail(); }); return; }
@@ -793,6 +811,7 @@ function makeStrokeTemplate(kind) {
   const c = T[kind];
   if (kind === 'fountain') return { tool: 'fountain', color: c.color, w: c.size * 3.2, op: c.op, tip: c.tip, sens: c.sens, pts: [] };
   if (kind === 'ball') return { tool: 'ball', color: c.color, w: c.size * 3, op: c.op, style: c.style, pts: [] };
+  if (kind === 'magic') return { tool: 'ball', color: c.color, w: c.size * 3, op: 1, style: 'solid', pts: [] };
   return { tool: 'hl', color: c.color, w: c.size * 22, op: c.op, pts: [] };
 }
 
@@ -1016,6 +1035,7 @@ function openNote(n) {
 }
 function closeNote() {
   if (!cur) return;
+  magicDrop();
   commitText(); clearSel(); flushSave(); cur = null;
   $('#editor').hidden = true; $('#library').hidden = false; renderLibrary();
 }
@@ -1071,7 +1091,7 @@ $('#emore').onclick = (e) => {
 function snap() { const p = page(); return { pg: p, strokes: p.strokes.slice(), images: p.images.map((o) => ({ ...o })), texts: p.texts.map((t) => ({ ...t })) }; }
 function pushUndo(s) { undoStack.push(s); if (undoStack.length > 500) undoStack.shift(); redoStack = []; updateChrome(); }
 function restore(from, to) {
-  commitText();
+  commitText(); magicDrop();
   let s, p, pi = -1;
   while (from.length) { s = from.pop(); pi = cur.pages.indexOf(s.pg); if (pi >= 0) break; }   // skip entries for pages that were deleted
   if (pi < 0) { updateChrome(); return; }
@@ -1310,7 +1330,7 @@ if (window.visualViewport) visualViewport.addEventListener('resize', () => setTi
 function positionEditor() {
   if (!editing) return;
   const t = editing.t, s = view.s;
-  Object.assign(ted.style, { left: (view.ox + t.x * s) + 'px', top: (view.oy + poy() + t.y * s) + 'px', width: t.w + 'px', fontSize: t.size + 'px', color: t.color, transform: `scale(${s})` });
+  Object.assign(ted.style, { fontFamily: t.font && t.font !== 'Onest' ? `"${t.font}", var(--f-body)` : '', left: (view.ox + t.x * s) + 'px', top: (view.oy + poy() + t.y * s) + 'px', width: t.w + 'px', fontSize: t.size + 'px', color: t.color, transform: `scale(${s})` });
   ted.style.height = 'auto'; ted.style.height = Math.max(t.size * 1.3, ted.scrollHeight) + 'px';
 }
 ted.addEventListener('input', positionEditor);
@@ -1484,7 +1504,7 @@ function buildStraight() {
 }
 function armStraighten(pt) {
   const a = action;
-  if (!a || a.type !== 'draw' || a.st.tool === 'hl') return;
+  if (!a || a.type !== 'draw' || a.st.tool === 'hl' || a.magic) return;
   if (a.anchor && Math.hypot(pt[0] - a.anchor[0], pt[1] - a.anchor[1]) < 5) return;
   a.anchor = pt; clearTimeout(a.holdT);
   if (a.straight) return;
@@ -1523,9 +1543,10 @@ live.addEventListener('pointerdown', (e) => {
   if (toolKind !== 'text' && editing) commitText();
   if (tapTool()) { action = { type: 'imgtap', id: e.pointerId, pointerType: e.pointerType, startScr: pt, moved: 0 }; return; }
   if (toolKind === 'hand') { action = { type: 'pan', id: e.pointerId, last: pt, pointerType: e.pointerType }; return; }
-  if (toolKind === 'fountain' || toolKind === 'ball' || toolKind === 'hl') {
+  if (toolKind === 'fountain' || toolKind === 'ball' || toolKind === 'hl' || toolKind === 'magic') {
     const st = makeStrokeTemplate(toolKind);
-    action = { type: 'draw', id: e.pointerId, pointerType: e.pointerType, st, stab: T[toolKind].stab || 0, lastP: e.pointerType === 'pen' ? (e.pressure || .35) : .5 };
+    if (toolKind === 'magic') magicHold();
+    action = { type: 'draw', magic: toolKind === 'magic', id: e.pointerId, pointerType: e.pointerType, st, stab: toolKind === 'magic' ? 2 : T[toolKind].stab || 0, lastP: e.pointerType === 'pen' ? (e.pressure || .35) : .5 };
     if (toolKind === 'hl' && T.hl.straight) { action.straight = true; action.start = w; action.end = w; action.avgP = .5; buildStraight(); }
     else pushRaw(e);
     armStraighten(pt); queueLive(); return;
@@ -1624,7 +1645,8 @@ function endPointer(e) {
     if (e.type !== 'pointercancel' && a.st.pts.length) {
       if (!a.straight && a.raw) { const p = a.st.pts, n = p.length; if (Math.hypot(a.raw[0] - p[n - 3], a.raw[1] - p[n - 2]) > .3) p.push(+a.raw[0].toFixed(1), +a.raw[1].toFixed(1), p[n - 1]); }
       pushUndo(snap()); page().strokes.push(a.st); renderBase(); scheduleSave();
-    }
+      if (a.magic) magicQueue(page(), a.st);
+    } else if (a.magic) magicResume();
     a.pred = null; renderLive();
   } else if (a.type === 'shape') {
     if (e.type !== 'pointercancel' && a.st && Math.hypot(a.end[0] - a.start[0], a.end[1] - a.start[1]) * view.s > 8) { pushUndo(snap()); page().strokes.push(a.st); renderBase(); scheduleSave(); }
@@ -1650,6 +1672,140 @@ live.addEventListener('wheel', (e) => {
   } else { view.ox -= e.deltaX; view.oy -= e.deltaY; }
   view.user = true; queuePan(); clearTimeout(live._wt); live._wt = setTimeout(() => { persistView(); if (cacheScaled) queueBase(); }, 300);
 }, { passive: false });
+
+/* ================= magic pen ================= */
+const MAGIC_FONTS = [['Caveat', 'Natural'], ['Dancing Script', 'Calligraphy'], ['Kalam', 'Marker'], ['Onest', 'Clean print']];
+const MAGIC_LANGS = [['auto', 'Auto'], ['en', 'English'], ['it', 'Italiano'], ['es', 'Español'], ['pt', 'Português'], ['fr', 'Français'], ['de', 'Deutsch']];
+let magicGroup = null;
+function magicHold() { if (magicGroup) clearTimeout(magicGroup.timer); }
+function magicQueue(pg, st) {
+  if (magicGroup && magicGroup.pg !== pg) magicFlush();
+  if (!magicGroup) magicGroup = { pg, strokes: [], timer: 0 };
+  magicGroup.strokes.push(st); magicResume();
+}
+function magicResume() {
+  const g = magicGroup; if (!g) return; clearTimeout(g.timer);
+  const quick = g.strokes.length === 1 && T.magic.shapes && recognizeShape(g.strokes[0]);   // a lone clean shape: don't keep you waiting
+  g.timer = setTimeout(magicFlush, quick ? 600 : 1100);
+}
+function magicDrop() { if (magicGroup) { clearTimeout(magicGroup.timer); magicGroup = null; } }
+function magicApply(pg, olds, strokes, texts) {
+  const S = new Set(olds);
+  pushUndo({ pg, strokes: pg.strokes.slice(), images: pg.images.map((o) => ({ ...o })), texts: pg.texts.map((t) => ({ ...t })) });
+  pg.strokes = pg.strokes.filter((x) => !S.has(x)).concat(strokes); pg.texts.push(...texts);
+  if (cur && cur.pages[pageIdx] === pg) clearSel();
+  renderBase(); renderLive(); scheduleSave();
+}
+async function magicFlush() {
+  const g = magicGroup; if (!g) return; magicGroup = null; clearTimeout(g.timer);
+  const pg = g.pg, live = () => g.strokes.filter((x) => pg.strokes.includes(x));
+  if (!cur || !cur.pages.includes(pg) || !live().length) return;
+  const cfg = T.magic;
+  if (cfg.shapes && g.strokes.length === 1) {
+    const sh = recognizeShape(g.strokes[0]);
+    if (sh) { magicApply(pg, live(), [sh.stroke], []); toast('✨ Perfect ' + sh.name + ' · Undo to go back'); return; }
+  }
+  if (!cfg.text) return;
+  const strokes = live(), b = itemsBox(strokes, [], []); if (!b || b[3] - b[1] > 420) return;   // big drawings are not writing
+  toast('✨ Reading…');
+  try {
+    const lines = await recognizeText(strokes), now = live(); if (!lines || !now.length || !cur.pages.includes(pg)) { if (lines === null) toast('Could not read that'); return; }
+    const texts = await layoutMagicText(lines, strokes[0].color); if (!texts.length) { toast('Could not read that'); return; }
+    magicApply(pg, now, [], texts); toast('✨ ' + lines.map((l) => l.text).join(' ').slice(0, 40) + ' · Undo to go back');
+  } catch (e) { toast("Couldn't read that · needs internet"); }
+}
+/* --- shapes --- */
+function recognizeShape(st) {
+  const P = []; for (let i = 0; i < st.pts.length; i += 3) P.push([st.pts[i], st.pts[i + 1]]);
+  if (P.length < 8) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, L = 0;
+  for (let i = 0; i < P.length; i++) { const [x, y] = P[i]; x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); if (i) L += Math.hypot(x - P[i - 1][0], y - P[i - 1][1]); }
+  const W = x1 - x0, H = y1 - y0, D = Math.hypot(W, H); if (D < 40 || L < 60) return null;
+  const A = P[0], Z = P[P.length - 1], ends = Math.hypot(Z[0] - A[0], Z[1] - A[1]);
+  const mk = (pts) => ({ tool: 'ball', color: st.color, w: st.w, op: 1, style: 'solid', pts });
+  const flat = (poly, closed) => {
+    const ring = closed ? poly.concat([poly[0]]) : poly, pts = [];
+    for (let i = 0; i < ring.length - 1; i++) { const [ax, ay] = ring[i], [bx, by] = ring[i + 1], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 10)); for (let k = 0; k < n; k++) pts.push(+(ax + (bx - ax) * k / n).toFixed(1), +(ay + (by - ay) * k / n).toFixed(1), .5); }
+    const l = ring[ring.length - 1]; pts.push(+l[0].toFixed(1), +l[1].toFixed(1), .5); return pts;
+  };
+  if (ends > L * .18) {   // open: a straight line?
+    const dx = Z[0] - A[0], dy = Z[1] - A[1], len = Math.hypot(dx, dy); let dev = 0;
+    for (const [x, y] of P) dev = Math.max(dev, Math.abs((x - A[0]) * dy - (y - A[1]) * dx) / len);
+    if (dev < Math.max(5, len * .07)) {
+      let ex = Z[0], ey = Z[1]; const ang = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (Math.abs(dy) < len * .1) ey = A[1]; else if (Math.abs(dx) < len * .1) ex = A[0];   // snap level / plumb
+      return { name: 'line', stroke: mk(flat([[A[0], A[1]], [ex, ey]], false)) };
+    }
+    return null;
+  }
+  // closed: resample evenly, then test ellipse and polygon fits
+  const N = 72, R = []; { const seg = []; let acc = 0; for (let i = 1; i < P.length; i++) { acc += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); seg.push(acc); }
+    const total = acc + ends; for (let k = 0; k < N; k++) { const d = k / N * total; let i = seg.findIndex((v) => v >= d); if (i < 0) { R.push(A); continue; } const p0 = P[i], p1 = P[i + 1] || P[i], s0 = i ? seg[i - 1] : 0, t = seg[i] > s0 ? (d - s0) / (seg[i] - s0) : 0; R.push([p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t]); } }
+  const cx = R.reduce((a, p) => a + p[0], 0) / N, cy = R.reduce((a, p) => a + p[1], 0) / N;
+  let sxx = 0, syy = 0, sxy = 0; for (const [x, y] of R) { sxx += (x - cx) ** 2; syy += (y - cy) ** 2; sxy += (x - cx) * (y - cy); }
+  const phi = .5 * Math.atan2(2 * sxy, sxx - syy), cs = Math.cos(phi), sn = Math.sin(phi);
+  let ua = 0, vb = 0; for (const [x, y] of R) { ua = Math.max(ua, Math.abs((x - cx) * cs + (y - cy) * sn)); vb = Math.max(vb, Math.abs(-(x - cx) * sn + (y - cy) * cs)); }
+  let err = 0; for (const [x, y] of R) { const u = ((x - cx) * cs + (y - cy) * sn) / ua, v = (-(x - cx) * sn + (y - cy) * cs) / vb; err += Math.abs(Math.hypot(u, v) - 1); } err /= N;
+  const ell = (a, b, rot) => { const pts = []; for (let i = 0; i <= 96; i++) { const t = i / 96 * Math.PI * 2, ex = a * Math.cos(t), ey = b * Math.sin(t); pts.push(+(cx + ex * Math.cos(rot) - ey * Math.sin(rot)).toFixed(1), +(cy + ex * Math.sin(rot) + ey * Math.cos(rot)).toFixed(1), .5); } return pts; };
+  if (err < .09) {
+    if (Math.abs(ua - vb) / Math.max(ua, vb) < .16) { const r = (ua + vb) / 2; return { name: 'circle', stroke: mk(ell(r, r, 0)) }; }
+    const upright = Math.abs(Math.sin(phi)) < .26 || Math.abs(Math.cos(phi)) < .26;   // near-level ovals snap level
+    return { name: 'oval', stroke: mk(ell(ua, vb, upright ? (Math.abs(Math.cos(phi)) > .5 ? 0 : Math.PI / 2) : phi)) };
+  }
+  // polygon: Douglas-Peucker on the closed loop
+  const dp = (pts, eps) => { if (pts.length < 3) return pts; let md = 0, mi = 0; const a = pts[0], z = pts[pts.length - 1], dx = z[0] - a[0], dy = z[1] - a[1], l = Math.hypot(dx, dy) || 1;
+    for (let i = 1; i < pts.length - 1; i++) { const d = Math.abs((pts[i][0] - a[0]) * dy - (pts[i][1] - a[1]) * dx) / l; if (d > md) { md = d; mi = i; } }
+    if (md > eps) { const l1 = dp(pts.slice(0, mi + 1), eps), l2 = dp(pts.slice(mi), eps); return l1.slice(0, -1).concat(l2); } return [a, z]; };
+  let far = 0, fi = 0; R.forEach((p, i) => { const d = Math.hypot(p[0] - R[0][0], p[1] - R[0][1]); if (d > far) { far = d; fi = i; } });
+  const ring = R.slice(fi).concat(R.slice(0, fi)).concat([R[fi]]), simp = dp(ring.slice(0, Math.floor(N / 2) + 1), D * .055).slice(0, -1).concat(dp(ring.slice(Math.floor(N / 2)), D * .055).slice(0, -1));
+  const V = simp.filter((p, i, a) => Math.hypot(p[0] - a[(i + 1) % a.length][0], p[1] - a[(i + 1) % a.length][1]) > D * .06);
+  const ang = (i) => { const p = V[(i + V.length - 1) % V.length], c = V[i], n = V[(i + 1) % V.length]; const a1 = Math.atan2(p[1] - c[1], p[0] - c[0]), a2 = Math.atan2(n[1] - c[1], n[0] - c[0]); let d = Math.abs(a1 - a2) * 180 / Math.PI; return d > 180 ? 360 - d : d; };
+  if (V.length === 3) return { name: 'triangle', stroke: mk(flat(V, true)) };
+  if (V.length === 4) {
+    if (V.every((_, i) => Math.abs(ang(i) - 90) < 22)) {
+      const e = Math.atan2(V[1][1] - V[0][1], V[1][0] - V[0][0]) * 180 / Math.PI, lvl = Math.min(Math.abs(e % 90), 90 - Math.abs(e % 90)) < 12;
+      if (lvl) return { name: 'rectangle', stroke: mk(flat([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], true)) };
+      return { name: 'rectangle', stroke: mk(flat(V, true)) };
+    }
+    return { name: 'shape', stroke: mk(flat(V, true)) };
+  }
+  if (V.length === 5 || V.length === 6) return { name: V.length === 5 ? 'pentagon' : 'hexagon', stroke: mk(flat(V, true)) };
+  return null;
+}
+/* --- handwriting --- */
+function magicLang() { const l = T.magic.lang; if (l !== 'auto') return l; const n = (navigator.language || 'en').slice(0, 2).toLowerCase(); return MAGIC_LANGS.some((x) => x[0] === n) ? n : 'en'; }
+async function recognizeText(strokes) {
+  const info = strokes.map((st) => ({ st, b: itemsBox([st], [], []) })).sort((a, b) => (a.b[1] + a.b[3]) - (b.b[1] + b.b[3]));
+  const lines = [];   // cluster by line
+  for (const it of info) {
+    const cy = (it.b[1] + it.b[3]) / 2, ln = lines.find((l) => cy > l.y0 - (l.y1 - l.y0) * .35 && cy < l.y1 + (l.y1 - l.y0) * .35);
+    if (ln) { ln.items.push(it); ln.y0 = Math.min(ln.y0, it.b[1]); ln.y1 = Math.max(ln.y1, it.b[3]); } else lines.push({ items: [it], y0: it.b[1], y1: it.b[3] });
+  }
+  const order = new Map(strokes.map((s, i) => [s, i])), out = [], lang = magicLang();
+  for (const ln of lines.sort((a, b) => a.y0 - b.y0)) {
+    const sts = ln.items.map((i) => i.st).sort((a, b) => order.get(a) - order.get(b)), box = itemsBox(sts, [], []); let t = 0;
+    const ink = sts.map((st) => { const xs = [], ys = [], ts = []; for (let i = 0; i < st.pts.length; i += 3) { xs.push(Math.round(st.pts[i])); ys.push(Math.round(st.pts[i + 1])); ts.push(t); t += 12; } t += 250; return [xs, ys, ts]; });
+    const body = { app_version: .4, api_level: '537.36', device: 'Chrome', input_type: 0, options: 'enable_pre_space', requests: [{ writing_guide: { writing_area_width: Math.round(box[2] - box[0]) + 40, writing_area_height: Math.max(80, Math.round(box[3] - box[1]) + 40) }, ink, language: lang }] };
+    const r = await fetch(`https://inputtools.google.com/request?itc=${lang}-t-i0-handwrit&app=mobilesearch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json(); if (d[0] !== 'SUCCESS') return null;
+    const text = ((d[1] && d[1][0] && d[1][0][1] && d[1][0][1][0]) || '').trim(); if (text) out.push({ text, box });
+  }
+  return out.length ? out : null;
+}
+async function layoutMagicText(lines, color) {
+  const f = T.magic.font; try { if (document.fonts) await document.fonts.load(`40px "${f}"`); } catch (e) {}
+  const cv = document.createElement('canvas'), c = cv.getContext('2d', { willReadFrequently: true }), texts = [];
+  for (const { text, box } of lines) {
+    cv.width = Math.max(300, text.length * 70 + 120); cv.height = 220; c.clearRect(0, 0, cv.width, cv.height);
+    c.font = fontFor(100, f); c.fillStyle = '#000'; c.textBaseline = 'top'; c.fillText(text, 20, 12 + 12);
+    const d = c.getImageData(0, 0, cv.width, cv.height).data; let top = 1e9, bot = -1, left = 1e9, right = -1;
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) if (d[(y * cv.width + x) * 4 + 3] > 60) { if (y < top) top = y; if (y > bot) bot = y; if (x < left) left = x; if (x > right) right = x; }
+    if (bot < 0) continue;
+    const k = Math.min(Math.max((box[3] - box[1]) / (bot - top + 1), .18), 1.4), size = Math.round(100 * k);
+    texts.push({ id: uid(), x: +(box[0] - (left - 20) * k).toFixed(1), y: +(box[1] - (top - 12) * k).toFixed(1), w: Math.ceil((right - left + 40) * k + 30), size, color, text, font: f });
+  }
+  return texts;
+}
 
 /* ================= images ================= */
 let pendingNewFromPhoto = false;
