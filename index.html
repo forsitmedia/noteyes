@@ -159,6 +159,8 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 .sw span{width:20px;height:20px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 1.5px rgba(0,0,0,.14)}
 .sw[aria-pressed="true"] span{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--c),inset 0 0 0 1.5px rgba(0,0,0,.14)}
 .ctx{position:absolute;z-index:6;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:5px;box-shadow:0 10px 30px -14px var(--shadow);max-width:calc(100% - 32px);overflow-x:auto}
+.ctx.near{bottom:auto;transform:translateX(-50%);padding:3px;border-radius:10px;gap:2px}
+.ctx.near button{padding:6px 10px;font-size:13px}
 .ctx button{padding:8px 13px;border-radius:8px;font-weight:600;font-size:14px;white-space:nowrap}
 .ctx button:hover{background:var(--accent-soft)}
 .ctx .del{color:var(--danger)}
@@ -167,6 +169,7 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
   .rail{top:auto;bottom:calc(12px + env(safe-area-inset-bottom,0px));transform:none;flex-direction:row;left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));max-height:none;overflow-x:auto}
   .rail hr{border-top:0;border-left:1px solid var(--line);margin:6px 4px}
   .ctx{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+  .ctx.near{bottom:auto}
   .lib-head h1{font-size:28px}
   .grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:22px 16px}
 }
@@ -859,10 +862,18 @@ function renderLive() {
     const b = selScreenBox(), pad = 8 / s;
     c.lineWidth = 1.6 / s; c.strokeStyle = '#2c56c9'; c.setLineDash([6 / s, 4 / s]);
     c.strokeRect(b[0] - pad, b[1] - pad, b[2] - b[0] + pad * 2, b[3] - b[1] + pad * 2); c.setLineDash([]);
-    c.fillStyle = '#fff'; c.beginPath(); c.arc(b[2] + pad, b[3] + pad, 11 / s, 0, Math.PI * 2); c.fill(); c.stroke();
-    c.beginPath(); c.moveTo(b[2] + pad - 4 / s, b[3] + pad - 4 / s); c.lineTo(b[2] + pad + 4 / s, b[3] + pad + 4 / s); c.stroke();
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(b[2] + pad, b[3] + pad, 8 / s, 0, Math.PI * 2); c.fill(); c.stroke();
+    c.beginPath(); c.moveTo(b[2] + pad - 3 / s, b[3] + pad - 3 / s); c.lineTo(b[2] + pad + 3 / s, b[3] + pad + 3 / s); c.stroke();
   }
-  positionEditor();
+  positionEditor(); positionCtx();
+}
+function positionCtx() {
+  const el = $('#ctx'); if (!sel || el.hidden) { el.classList.remove('near'); el.style.top = ''; el.style.left = ''; return; }
+  const b = selScreenBox(), s = view.s, y0 = view.oy + poy();
+  const cx = view.ox + (b[0] + b[2]) / 2 * s, top = y0 + b[1] * s - 14, bot = y0 + b[3] * s + 14, h = el.offsetHeight || 40;
+  el.classList.add('near');
+  el.style.left = clamp(cx, el.offsetWidth / 2 + 8, W - el.offsetWidth / 2 - 8) + 'px';
+  el.style.top = (top - h > 64 ? top - h : Math.min(bot, H - h - 12)) + 'px';
 }
 let rafB = 0; function queueBase() { if (!rafB) rafB = requestAnimationFrame(() => { rafB = 0; renderBase(); renderLive(); }); }
 let rafL = 0; function queueLive() { if (!rafL) rafL = requestAnimationFrame(() => { rafL = 0; renderLive(); }); }
@@ -894,8 +905,8 @@ function updateChrome() {
   const ctx = $('#ctx');
   if (sel) {
     ctx.innerHTML = `${sel.strokes.length || sel.texts.length ? '<button data-sa="color">Color</button>' : ''}<button data-sa="dup">Duplicate</button>${sel.images.length ? '<button data-sa="front">To front</button>' : ''}<button data-sa="del" class="del">Delete</button><button data-sa="done">Done</button>`;
-    ctx.hidden = false;
-  } else ctx.hidden = true;
+    ctx.hidden = false; positionCtx();
+  } else { ctx.hidden = true; positionCtx(); }
 }
 function gotoPage(i) {
   commitText(); clearSel();
@@ -916,8 +927,12 @@ $('#emore').onclick = (e) => {
   const nb = cur.kind === 'notebook';
   popover(e.currentTarget, `
     <button class="row" data-a="clear">${ic('eraser')}<span>${nb ? 'Clear this page' : 'Clear whiteboard'}</span></button>
+    <hr><button class="row" data-a="pdf">${ic('paper')}<span>Export as PDF<small>${nb ? 'All pages' : 'Whole board'}</small></span></button>
+    <button class="row" data-a="png">${ic('image')}<span>Export as image (PNG)<small>${nb ? 'Current page' : 'Whole board'}</small></span></button>
+    <button class="row" data-a="json">${ic('notebook')}<span>Backup file (.json)<small>Re-importable data</small></span></button><hr>
     ${nb ? `<button class="row danger" data-a="delpage">${ic('trash')}<span>Delete page ${pageIdx + 1}</span></button>` : ''}`,
   (a, b) => {
+    if (a === 'pdf' || a === 'png' || a === 'json') { closeOverlay(); exportNote(a); return; }
     if (a === 'clear') { commitText(); clearSel(); pushUndo(snap()); Object.assign(page(), blankPage()); closeOverlay(); renderBase(); renderLive(); scheduleSave(); toast('Cleared · Undo brings it back'); }
     if (a === 'delpage') {
       if (!b.dataset.armed) { b.dataset.armed = '1'; b.querySelector('span').textContent = 'Tap again to delete page'; return; }
@@ -948,6 +963,67 @@ document.addEventListener('keydown', (e) => {
   if ((e.key === 'Backspace' || e.key === 'Delete') && sel) deleteSel();
   if (e.key === 'Escape') { clearSel(); commitText(); }
 });
+/* ================= export ================= */
+async function loadAllImages(pages) {
+  await Promise.all(pages.flatMap((pg) => pg.images.map((o) => { const im = getImg(o.src); return im.complete && im.naturalWidth ? 0 : new Promise((r) => { im.addEventListener('load', r, { once: true }); im.addEventListener('error', r, { once: true }); }); })));
+}
+function pageCanvas(pg, scale) {
+  const nb = cur.kind === 'notebook';
+  let b = nb ? [0, 0, PAGE.w, PAGE.h] : bbox(pg); if (!b) b = [0, 0, 1000, 700]; else if (!nb) b = [b[0] - 50, b[1] - 50, b[2] + 50, b[3] + 50];
+  const w = b[2] - b[0], h = b[3] - b[1], k = Math.min(scale, 4200 / Math.max(w, h));
+  const cv = document.createElement('canvas'); cv.width = Math.round(w * k); cv.height = Math.round(h * k);
+  const c = cv.getContext('2d'); c.fillStyle = PAPER; c.fillRect(0, 0, cv.width, cv.height);
+  c.setTransform(k, 0, 0, k, -b[0] * k, -b[1] * k);
+  drawPattern(c, cur.paper, b[0], b[1], b[2], b[3], k, nb);
+  drawContent(c, pg);
+  return { cv, w, h };
+}
+function buildPDF(pages) {   // pages: [{ jpeg: Uint8Array, pw, ph, w, h }] pw/ph in pixels of the jpeg, w/h in points
+  const enc = new TextEncoder(), parts = []; let len = 0; const offs = [];
+  const put = (x) => { const u = typeof x === 'string' ? enc.encode(x) : x; parts.push(u); len += u.length; };
+  const obj = (n, body) => { offs[n] = len; put(`${n} 0 obj\n`); put(body); put('\nendobj\n'); };
+  put('%PDF-1.4\n');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Count ${pages.length} /Kids [${pages.map((_, i) => `${3 + i * 3} 0 R`).join(' ')}] >>`);
+  pages.forEach((p, i) => {
+    const n = 3 + i * 3, content = `q ${p.w} 0 0 ${p.h} 0 0 cm /Im0 Do Q`;
+    obj(n, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${p.w} ${p.h}] /Resources << /XObject << /Im0 ${n + 2} 0 R >> >> /Contents ${n + 1} 0 R >>`);
+    obj(n + 1, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+    offs[n + 2] = len; put(`${n + 2} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${p.pw} /Height ${p.ph} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.jpeg.length} >>\nstream\n`); put(p.jpeg); put('\nendstream\nendobj\n');
+  });
+  const total = 3 + pages.length * 3, xr = len;
+  put(`xref\n0 ${total}\n0000000000 65535 f \n` + offs.slice(1, total).map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join(''));
+  put(`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xr}\n%%EOF`);
+  const out = new Uint8Array(len); let o = 0; for (const u of parts) { out.set(u, o); o += u.length; }
+  return new Blob([out], { type: 'application/pdf' });
+}
+async function saveBlob(blob, name) {
+  const file = new File([blob], name, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] }) && matchMedia('(pointer:coarse)').matches) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+async function exportNote(kind) {
+  commitText(); clearSel();
+  const base = (cur.title || 'Untitled').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60);
+  try {
+    if (kind === 'json') { await saveBlob(new Blob([JSON.stringify(cur)], { type: 'application/json' }), base + '.inkwell.json'); return; }
+    toast('Preparing…'); await loadAllImages(cur.pages); if (document.fonts) await document.fonts.ready;
+    if (kind === 'png') {
+      const { cv } = pageCanvas(page(), 2), blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+      await saveBlob(blob, `${base}${cur.kind === 'notebook' ? '-p' + (pageIdx + 1) : ''}.png`); return;
+    }
+    const out = [];
+    for (const pg of cur.kind === 'notebook' ? cur.pages : [page()]) {
+      const { cv, w, h } = pageCanvas(pg, 1.6), blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', .92));
+      const k = cur.kind === 'notebook' ? 595 / w : 714 / Math.max(w, h);
+      out.push({ jpeg: new Uint8Array(await blob.arrayBuffer()), pw: cv.width, ph: cv.height, w: +(w * k).toFixed(2), h: +(h * k).toFixed(2) });
+    }
+    await saveBlob(buildPDF(out), base + '.pdf');
+  } catch (e) { toast('Export failed'); }
+}
 let saveT = 0;
 function scheduleSave() { if (!cur) return; cur.updated = Date.now(); clearTimeout(saveT); const n = cur; saveT = setTimeout(() => { n.thumb = makeThumb(n); DB.put(n); }, 700); }
 function flushSave() { clearTimeout(saveT); cur.thumb = makeThumb(cur); DB.put(cur); }
@@ -1425,7 +1501,8 @@ $('#file').addEventListener('change', () => {
       const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
       c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
       const data = { src: c.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', .86), w: c.width, h: c.height };
-      if (pendingNewFromPhoto) newSheet('notebook', data); else insertImage(data);
+      if (pendingNewFromPhoto) newSheet('notebook', data);
+      else { const g = getImg(data.src); const go = () => insertImage(data); if (g.complete && g.naturalWidth) go(); else g.addEventListener('load', go, { once: true }); }
     };
     im.onerror = () => toast('That file could not be opened as an image');
     im.src = rd.result;

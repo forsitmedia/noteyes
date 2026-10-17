@@ -1,0 +1,37 @@
+- generic [active] [ref=f6e1]:
+  - generic [ref=f6e2]:
+    - generic:
+      - generic [ref=f6e6]:
+        - button "Back to library" [ref=f6e7] [cursor=pointer]
+        - textbox "Title" [ref=f6e10]: Example · Shoot plan
+      - generic [ref=f6e11]:
+        - button "Undo" [ref=f6e12] [cursor=pointer]
+        - button "Redo" [disabled]
+      - generic [ref=f6e16]:
+        - button "Previous page" [disabled]
+        - generic [ref=f6e17]: 1 / 5
+        - button "Next page" [ref=f6e18] [cursor=pointer]
+        - button "Add page" [ref=f6e21] [cursor=pointer]
+      - generic [ref=f6e25]:
+        - button "Pencil only" [ref=f6e26] [cursor=pointer]
+        - button "Paper style" [ref=f6e27] [cursor=pointer]
+        - button "Fit to screen" [ref=f6e31] [cursor=pointer]
+        - button "More" [ref=f6e34] [cursor=pointer]
+    - generic [ref=f6e39]:
+      - button "Fountain pen" [pressed] [ref=f6e40] [cursor=pointer]
+      - button "Ballpoint pen" [ref=f6e45] [cursor=pointer]
+      - button "Highlighter" [ref=f6e50] [cursor=pointer]
+      - button "Eraser" [ref=f6e55] [cursor=pointer]
+      - button "Lasso" [ref=f6e59] [cursor=pointer]
+      - button "Text" [ref=f6e63] [cursor=pointer]
+      - button "Fill bucket" [ref=f6e68] [cursor=pointer]
+      - button "Move canvas" [ref=f6e73] [cursor=pointer]
+      - button "Image" [ref=f6e76] [cursor=pointer]
+      - separator [ref=f6e81]
+      - 'button "Color #111418" [pressed] [ref=f6e82] [cursor=pointer]'
+      - 'button "Color #e5484d" [ref=f6e84] [cursor=pointer]'
+      - 'button "Color #3b7bea" [ref=f6e86] [cursor=pointer]'
+      - 'button "Color #1d8a58" [ref=f6e88] [cursor=pointer]'
+      - 'button "Color #f5c84c" [ref=f6e90] [cursor=pointer]'
+      - 'button "Color #ffffff" [ref=f6e92] [cursor=pointer]'
+  - generic: Preparing…
