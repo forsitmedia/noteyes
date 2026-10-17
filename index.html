@@ -652,7 +652,7 @@ const SLIDERS = {
   stab: { label: 'Stability', min: 0, max: 10, step: 1, fmt: (v) => String(v), hint: 'Smooths shaky lines' },
   tip: { label: 'Tip', min: 0, max: 1, step: .05, fmt: (v) => Math.round(v * 100) + '%', hint: 'Taper at start and end' },
   sens: { label: 'Sensitivity', min: 0, max: 1, step: .05, fmt: (v) => Math.round(v * 100) + '%', hint: 'How much pressure changes width' },
-  size: { label: 'Thickness', min: .2, max: 5, step: .1, fmt: (v) => v.toFixed(1), pm: true },
+  size: { label: 'Thickness', min: .2, max: 20, step: .1, fmt: (v) => v.toFixed(1), pm: true },
   op: { label: 'Concentration', min: .1, max: 1, step: .05, fmt: (v) => Math.round(v * 100) + '%' }
 };
 const TOOL_CTRLS = {
@@ -668,7 +668,7 @@ const LINE_SVG = {
 };
 function sliderRange(key, kind) {
   const d = Object.assign({}, SLIDERS[key]);
-  if (kind === 'hl') { if (key === 'size') { d.min = .3; d.max = 4; } if (key === 'op') { d.min = .1; d.max = .8; } }
+  if (kind === 'hl') { if (key === 'size') { d.min = .3; d.max = 12; } if (key === 'op') { d.min = .1; d.max = .8; } }
   return d;
 }
 function openToolSettings(kind, btn) {
@@ -686,7 +686,7 @@ function openToolSettings(kind, btn) {
     if (kind === 'ball') extra = `<div class="seg">${['solid', 'dotted', 'dashed'].map((s) => `<button data-style="${s}" aria-pressed="${cfg.style === s}" aria-label="${s} line">${LINE_SVG[s]}</button>`).join('')}</div>`;
     if (kind === 'hl') extra = `<div class="seg"><button data-straight="0" aria-pressed="${!cfg.straight}">Freehand</button><button data-straight="1" aria-pressed="${!!cfg.straight}">Straight lines</button></div>`;
     if (kind === 'eraser') extra = `<div class="seg"><button data-mode="stroke" aria-pressed="${cfg.mode === 'stroke'}">Whole stroke</button><button data-mode="partial" aria-pressed="${cfg.mode === 'partial'}">Partial</button></div>
-      <div class="ctl"><div class="ctl-top"><span>Size</span><b><span data-val="esize">${cfg.size}</span></b></div><input type="range" id="r-eraser-size" data-k="size" min="1" max="5" step="1" value="${cfg.size}" aria-label="Eraser size"></div>`;
+      <div class="ctl"><div class="ctl-top"><span>Size</span><b><span data-val="esize">${cfg.size}</span></b></div><input type="range" id="r-eraser-size" data-k="size" min="1" max="20" step="1" value="${cfg.size}" aria-label="Eraser size"></div>`;
     if (kind === 'shape') extra = `<div class="seg" style="grid-auto-flow:row;grid-template-columns:repeat(4,1fr)">${SHAPES.map(([k, l]) => `<button data-shape="${k}" aria-pressed="${cfg.kind === k}">${l}</button>`).join('')}</div>`;
     if (kind === 'text') extra = `<div class="ctl"><div class="ctl-top"><span>Text size</span><b><span data-val="tsize">${cfg.size}</span></b></div><input type="range" id="r-text-size" data-k="size" min="12" max="96" step="2" value="${cfg.size}" aria-label="Text size"></div>`;
     const pal = cfg.color ? `<hr><div class="pal-head"><span>Color</span><button class="rainbow" data-pick aria-label="Custom color">+</button></div>
@@ -1016,13 +1016,11 @@ $('#emore').onclick = (e) => {
   if (nb) { const v = visPage(); if (v !== pageIdx) { commitText(); clearSel(); pageIdx = v; } }   // menu acts on the page shown in the counter
   popover(e.currentTarget, `
     <button class="row" data-a="clear">${ic('eraser')}<span>${nb ? 'Clear this page' : 'Clear whiteboard'}</span></button>
-    <hr><button class="row" data-a="paste">${ic('image')}<span>Paste image<small>From the clipboard</small></span></button>
     <hr><button class="row" data-a="pdf">${ic('paper')}<span>Export as PDF<small>${nb ? 'All pages' : 'Whole board'}</small></span></button>
     <button class="row" data-a="png">${ic('image')}<span>Export as image (PNG)<small>${nb ? 'Current page' : 'Whole board'}</small></span></button>
     <button class="row" data-a="json">${ic('notebook')}<span>Backup file (.json)<small>Re-importable data</small></span></button><hr>
     ${nb ? `<button class="row danger" data-a="delpage">${ic('trash')}<span>Delete page ${pageIdx + 1}</span></button>` : ''}`,
   (a, b) => {
-    if (a === 'paste') { closeOverlay(); pasteFromClipboard(); return; }
     if (a === 'pdf' || a === 'png' || a === 'json') { closeOverlay(); exportNote(a); return; }
     if (a === 'clear') { commitText(); clearSel(); pushUndo(snap()); Object.assign(page(), blankPage()); closeOverlay(); renderBase(); renderLive(); scheduleSave(); toast('Cleared · Undo brings it back'); }
     if (a === 'delpage') {
