@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Inkwell Notes</title>
+<title>NoteYes</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Inkwell">
+<meta name="apple-mobile-web-app-title" content="NoteYes">
 <meta name="theme-color" content="#eceff4" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#13171e" media="(prefers-color-scheme: dark)">
 <link rel="manifest" href="manifest.webmanifest">
@@ -139,7 +139,7 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 #stage canvas{position:absolute;inset:0;width:100%;height:100%}
 #live{touch-action:none}
 #stage.drop{outline:3px dashed var(--accent);outline-offset:-6px}
-.gal{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;max-height:46vh;overflow:auto;-webkit-overflow-scrolling:touch}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:12px;max-height:56vh;overflow:auto;-webkit-overflow-scrolling:touch}
 .gal button{padding:0;border:0;border-radius:10px;overflow:hidden;aspect-ratio:1;background:var(--bg)}
 .gal img{width:100%;height:100%;object-fit:cover;display:block}
 .srow{display:flex;gap:8px;margin-top:8px}
@@ -616,13 +616,12 @@ $('#rail').addEventListener('click', (e) => {
     const pop = popover(btn, `
       <button class="row" data-a="library">${ic('image')}<span>Photos &amp; Files<small>Library, camera or a file</small></span></button>
       <button class="row" data-a="search">${ic('search')}<span>Search the web<small>Find an image and add it</small></span></button>
-      <button class="row" data-a="paste">${ic('image')}<span>Paste image<small>From the clipboard</small></span></button>
-      <button class="row" data-a="weblink">${ic('image')}<span>From a web link</span></button>`,
+      <button class="row" data-a="paste">${ic('image')}<span>Paste image<small>From the clipboard</small></span></button>`,
     (a, b) => {
       pendingPlace = null;
       if (a === 'library') { const rb = b.getBoundingClientRect(), f = $('#file'); f.style.left = rb.left + 'px'; f.style.top = rb.top + 'px'; closeOverlay(); pickImage(false); return; }
       closeOverlay();
-      if (a === 'search') searchSheet(); if (a === 'paste') pasteFromClipboard(); if (a === 'weblink') linkSheet();
+      if (a === 'search') searchSheet(); if (a === 'paste') pasteFromClipboard();
     });
     place(pop, r, 'right'); return;
   }
@@ -1008,14 +1007,12 @@ $('#emore').onclick = (e) => {
   popover(e.currentTarget, `
     <button class="row" data-a="clear">${ic('eraser')}<span>${nb ? 'Clear this page' : 'Clear whiteboard'}</span></button>
     <hr><button class="row" data-a="paste">${ic('image')}<span>Paste image<small>From the clipboard</small></span></button>
-    <button class="row" data-a="weblink">${ic('image')}<span>Image from web link<small>Paste an address</small></span></button>
     <hr><button class="row" data-a="pdf">${ic('paper')}<span>Export as PDF<small>${nb ? 'All pages' : 'Whole board'}</small></span></button>
     <button class="row" data-a="png">${ic('image')}<span>Export as image (PNG)<small>${nb ? 'Current page' : 'Whole board'}</small></span></button>
     <button class="row" data-a="json">${ic('notebook')}<span>Backup file (.json)<small>Re-importable data</small></span></button><hr>
     ${nb ? `<button class="row danger" data-a="delpage">${ic('trash')}<span>Delete page ${pageIdx + 1}</span></button>` : ''}`,
   (a, b) => {
     if (a === 'paste') { closeOverlay(); pasteFromClipboard(); return; }
-    if (a === 'weblink') { closeOverlay(); linkSheet(); return; }
     if (a === 'pdf' || a === 'png' || a === 'json') { closeOverlay(); exportNote(a); return; }
     if (a === 'clear') { commitText(); clearSel(); pushUndo(snap()); Object.assign(page(), blankPage()); closeOverlay(); renderBase(); renderLive(); scheduleSave(); toast('Cleared · Undo brings it back'); }
     if (a === 'delpage') {
@@ -1094,7 +1091,7 @@ async function exportNote(kind) {
   commitText(); clearSel();
   const base = (cur.title || 'Untitled').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 60);
   try {
-    if (kind === 'json') { await saveBlob(new Blob([JSON.stringify(cur)], { type: 'application/json' }), base + '.inkwell.json'); return; }
+    if (kind === 'json') { await saveBlob(new Blob([JSON.stringify(cur)], { type: 'application/json' }), base + '.noteyes.json'); return; }
     toast('Preparing…'); await loadAllImages(cur.pages); if (document.fonts) await document.fonts.ready;
     if (kind === 'png') {
       const { cv } = pageCanvas(page(), 2), blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
@@ -1719,35 +1716,54 @@ async function pasteFromClipboard() {
     toast('No image in the clipboard');
   } catch (e) { pendingPlace = null; toast('Copy an image first (long-press it → Copy), then try again'); }
 }
-let searchState = { q: '', page: 1 };
+/* image search: Wikimedia Commons + Openverse side by side, results appear as each source answers, scrolling loads more */
+const IMG_SOURCES = {
+  async commons(q, page) {
+    const r = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q + ' filetype:bitmap')}&gsrnamespace=6&gsrlimit=24&gsroffset=${(page - 1) * 24}&prop=imageinfo&iiprop=url|mime&iiurlwidth=1280&format=json&origin=*`);
+    if (!r.ok) throw 0; const d = await r.json(), pages = d.query ? Object.values(d.query.pages) : [];
+    return pages.sort((a, b) => a.index - b.index).filter((p) => p.imageinfo && p.imageinfo[0].thumburl).map((p) => {
+      const t = p.imageinfo[0].thumburl; return { id: 'c' + p.pageid, title: p.title.replace(/^File:/, ''), thumb: t.replace('/1280px-', '/330px-'), full: t, fallback: t.replace('/1280px-', '/960px-') };
+    });
+  },
+  async openverse(q, page) {
+    const r = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=20&page=${page}&mature=false`);
+    if (!r.ok) throw 0; const d = await r.json();
+    return d.results.map((it) => ({ id: 'o' + it.id, title: it.title || '', thumb: it.thumbnail, full: it.url, fallback: it.thumbnail }));
+  }
+};
 function searchSheet() {
   const s = sheet(`<h2>Search images</h2>
     <div class="srow"><input type="search" id="sq" placeholder="Search the web for images" enterkeyhint="search" autocapitalize="none" autocorrect="off" spellcheck="false"><button class="btn primary" data-go>Search</button></div>
-    <div class="gal" id="sres" hidden></div><div class="note" id="smsg">Free-to-use pictures from Openverse. Tap one to add it to your note.</div>
-    <div class="actions" style="margin-top:12px"><button class="btn ghost" data-more hidden>More</button><button class="btn ghost" data-x>Close</button></div>`);
-  s.style.width = 'min(640px,calc(100vw - 32px))'; s.style.maxHeight = '88vh'; s.style.overflow = 'auto';
-  const inp = s.querySelector('#sq'), res = s.querySelector('#sres'), msg = s.querySelector('#smsg'), more = s.querySelector('[data-more]'), items = new Map();
+    <div class="gal" id="sres" hidden></div><div class="note" id="smsg">Free-to-use pictures from Wikimedia Commons and Openverse. Tap one to add it.</div>
+    <div class="actions" style="margin-top:12px"><button class="btn ghost" data-x>Close</button></div>`);
+  s.style.width = 'min(720px,calc(100vw - 32px))'; s.style.maxHeight = '90vh'; s.style.overflow = 'auto';
+  const inp = s.querySelector('#sq'), res = s.querySelector('#sres'), msg = s.querySelector('#smsg'), items = new Map();
+  let token = 0, page = 1, q = '', busy = false, done = false, t0 = 0;
   setTimeout(() => inp.focus(), 40);
-  async function run(page) {
-    const q = inp.value.trim(); if (!q) return;
-    if (page === 1) { res.innerHTML = ''; items.clear(); }
-    msg.textContent = 'Searching…'; more.hidden = true;
-    try {
-      const r = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=18&page=${page}&mature=false`);
-      if (!r.ok) throw 0; const d = await r.json();
-      for (const it of d.results) { if (items.has(it.id)) continue; items.set(it.id, it); res.insertAdjacentHTML('beforeend', `<button data-id="${it.id}" aria-label="${esc(it.title || 'image')}"><img loading="lazy" alt="" src="${it.thumbnail}"></button>`); }
-      res.hidden = !items.size; searchState = { q, page };
-      msg.textContent = items.size ? 'Free-to-use pictures from Openverse · tap one to add it' : 'No images found. Try different words.';
-      more.hidden = !d.results.length || page >= d.page_count;
-    } catch (e) { msg.textContent = 'Search is not available right now. Check your connection and try again.'; }
+  function add(list) {
+    const html = []; for (const it of list) { if (items.has(it.id)) continue; items.set(it.id, it); html.push(`<button data-id="${it.id}" aria-label="${esc(it.title)}"><img decoding="async" alt="" src="${it.thumb}" onerror="this.parentNode.remove()"></button>`); }
+    res.insertAdjacentHTML('beforeend', html.join('')); res.hidden = !items.size;
+  }
+  async function load(reset) {
+    if (reset) { q = inp.value.trim(); if (!q) return; page = 1; done = false; items.clear(); res.innerHTML = ''; res.hidden = true; token++; }
+    else if (busy || done) return;
+    const my = token, pg = page; busy = true; msg.textContent = 'Searching…';
+    const runs = Object.values(IMG_SOURCES).map((f) => f(q, pg).then((l) => { if (my === token) add(l); return l.length; }).catch(() => -1));
+    const counts = await Promise.all(runs); if (my !== token) return;
+    busy = false; page++;
+    if (counts.every((c) => c === -1)) { msg.textContent = 'Search is not available right now. Check your connection and try again.'; done = true; return; }
+    if (counts.every((c) => c <= 0)) done = true;
+    msg.textContent = items.size ? 'Free-to-use pictures · tap one to add it · scroll for more' : 'No images found. Try different words.';
+    if (!done && res.scrollHeight <= res.clientHeight + 40) load(false);   // fill the grid if the first page was short
   }
   s.onclick = (e) => {
     if (e.target.closest('[data-x]')) closeOverlay();
-    if (e.target.closest('[data-go]')) run(1);
-    if (e.target.closest('[data-more]')) run(searchState.page + 1);
-    const b = e.target.closest('[data-id]'); if (b) { const it = items.get(b.dataset.id); closeOverlay(); importImageURL(it.url, it.thumbnail); }
+    if (e.target.closest('[data-go]')) load(true);
+    const b = e.target.closest('[data-id]'); if (b) { const it = items.get(b.dataset.id); closeOverlay(); importImageURL(it.full, it.fallback); }
   };
-  inp.onkeydown = (e) => { if (e.key === 'Enter') run(1); };
+  inp.onkeydown = (e) => { if (e.key === 'Enter') { clearTimeout(t0); load(true); } };
+  inp.addEventListener('input', () => { clearTimeout(t0); t0 = setTimeout(() => load(true), 450); });   // results follow your typing
+  res.addEventListener('scroll', () => { if (res.scrollTop + res.clientHeight > res.scrollHeight - 160) load(false); });
 }
 /* press and hold (or right click) anywhere on the page for a quick add-image menu at that spot */
 let lp = null, lpFired = false;
@@ -1755,19 +1771,10 @@ function clearLP() { if (lp) { clearTimeout(lp.t); lp = null; } }
 function showPressMenu(pt, cx, cy) {
   const anchor = { getBoundingClientRect: () => ({ left: cx, top: cy, right: cx, bottom: cy, width: 0, height: 0 }) };
   popover(anchor, `<button class="row" data-a="paste">${ic('image')}<span>Paste image</span></button>
-    <button class="row" data-a="search">${ic('search')}<span>Search the web</span></button>
-    <button class="row" data-a="weblink">${ic('image')}<span>From a web link</span></button>`, (a) => {
+    <button class="row" data-a="search">${ic('search')}<span>Search the web</span></button>`, (a) => {
     closeOverlay(); setPlaceAt(pt);
-    if (a === 'paste') pasteFromClipboard(); if (a === 'search') searchSheet(); if (a === 'weblink') linkSheet();
+    if (a === 'paste') pasteFromClipboard(); if (a === 'search') searchSheet();
   });
-}
-function linkSheet() {
-  const s = sheet(`<h2>Image from the web</h2><div><label for="iu">Image address</label><input type="url" id="iu" placeholder="https://…" autocapitalize="none" autocorrect="off" spellcheck="false"></div>
-    <div class="actions"><button class="btn ghost" data-x>Cancel</button><button class="btn primary" data-go>Add image</button></div>`);
-  const inp = s.querySelector('#iu'); setTimeout(() => inp.focus(), 30);
-  const go = () => { const u = inp.value.trim(); if (!u) return; closeOverlay(); importImageURL(u); };
-  s.onclick = (e) => { if (e.target.closest('[data-x]')) closeOverlay(); if (e.target.closest('[data-go]')) go(); };
-  inp.onkeydown = (e) => { if (e.key === 'Enter') go(); };
 }
 document.addEventListener('paste', (e) => {
   if (!cur || $('#editor').hidden) return;

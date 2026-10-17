@@ -1,4 +1,4 @@
-# Inkwell Notes
+# NoteYes
 
 A simple, ad-free handwriting notes app for iPad and Apple Pencil. It runs in Safari and installs to the Home Screen like a normal app.
 
@@ -12,7 +12,7 @@ A simple, ad-free handwriting notes app for iPad and Apple Pencil. It runs in Sa
 ## Install on iPad
 1. Open the site in **Safari**.
 2. Tap **Share → Add to Home Screen**.
-3. Open **Inkwell** from the Home Screen.
+3. Open **NoteYes** from the Home Screen.
 
 ## Files
 - `index.html` — the whole app

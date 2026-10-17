@@ -1,6 +1,6 @@
 {
-  "name": "Inkwell Notes",
-  "short_name": "Inkwell",
+  "name": "NoteYes",
+  "short_name": "NoteYes",
   "description": "Ad-free handwriting notes for iPad and Apple Pencil.",
   "start_url": "./",
   "scope": "./",
