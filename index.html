@@ -433,9 +433,11 @@ function getImg(src) {
   return im;
 }
 function drawContent(c, pg, skip) {
-  for (const o of pg.images) { if (skip && skip.has(o)) continue; const im = getImg(o.src); if (im.complete && im.naturalWidth) c.drawImage(im, o.x, o.y, o.w, o.h); }
+  const img = (o) => { if (skip && skip.has(o)) return; const im = getImg(o.src); if (im.complete && im.naturalWidth) c.drawImage(im, o.x, o.y, o.w, o.h); };
+  for (const o of pg.images) if (!o.top) img(o);                       // images behind the ink (default)
   for (const st of pg.strokes) if (!skip || !skip.has(st)) drawStroke(c, st);
   for (const t of pg.texts) if (!skip || !skip.has(t)) drawText(c, t);
+  for (const o of pg.images) if (o.top) img(o);                        // images brought in front of everything
 }
 
 /* ================= library ================= */
@@ -961,7 +963,7 @@ function updateChrome() {
   if (cur.kind === 'notebook') updatePageNo();
   const ctx = $('#ctx');
   if (sel) {
-    ctx.innerHTML = `${sel.strokes.length || sel.texts.length ? '<button data-sa="color">Color</button>' : ''}<button data-sa="dup">Duplicate</button>${sel.images.length ? '<button data-sa="front">To front</button>' : ''}<button data-sa="del" class="del">Delete</button><button data-sa="done">Done</button>`;
+    ctx.innerHTML = `${sel.strokes.length || sel.texts.length ? '<button data-sa="color">Color</button>' : ''}<button data-sa="dup">Duplicate</button>${sel.images.length ? '<button data-sa="layer">Layer</button>' : ''}<button data-sa="del" class="del">Delete</button><button data-sa="done">Done</button>`;
     ctx.hidden = false; positionCtx();
   } else { ctx.hidden = true; positionCtx(); }
 }
@@ -1147,7 +1149,14 @@ $('#ctx').addEventListener('click', (e) => {
     pg.strokes.push(...ns); pg.images.push(...ni); pg.texts.push(...nt);
     makeSel(ns, ni, nt); scheduleSave();
   }
-  if (a === 'front') { pushUndo(snap()); const S = new Set(sel.images); pg.images = pg.images.filter((x) => !S.has(x)).concat(sel.images); renderBase(); renderLive(); scheduleSave(); }
+  if (a === 'layer') {
+    const o = sel.images[0], cur0 = o.top ? 'in front of the ink' : 'behind the ink';
+    popover(b, `<div class="menu"><div style="padding:8px 14px 4px;font-size:12px;color:var(--muted)">Now ${cur0}</div>
+      <button class="row" data-a="front"><span>Bring to front<small>Above everything, ink too</small></span></button>
+      <button class="row" data-a="fwd"><span>Bring forward</span></button>
+      <button class="row" data-a="bwd"><span>Send backward</span></button>
+      <button class="row" data-a="back"><span>Send to back<small>Under the ink</small></span></button></div>`, (act) => { closeOverlay(); layerImages(act); });
+  }
   if (a === 'color') {
     popover(b, `<div class="pal" style="padding:8px;grid-template-columns:repeat(5,1fr)">${prefs.palette.map((c) => `<button data-a="${c}" style="--c:${c}" aria-label="${c}"></button>`).join('')}</div>`, (c) => {
       closeOverlay(); pushUndo(snap());
@@ -1158,6 +1167,27 @@ $('#ctx').addEventListener('click', (e) => {
     });
   }
 });
+function layerImages(act) {
+  pushUndo(snap());
+  const pg = page(), fills = (arr) => arr.filter((o) => o.fill).length;
+  for (const o of sel.images) {
+    const arr = pg.images, i = arr.indexOf(o); if (i < 0) continue;
+    const sameGroup = (x) => !x.fill && !!x.top === !!o.top;
+    if (act === 'front') { arr.splice(i, 1); o.top = true; arr.push(o); }
+    else if (act === 'back') { arr.splice(i, 1); o.top = false; arr.splice(fills(arr), 0, o); }
+    else if (act === 'fwd') {
+      let j = i + 1; while (j < arr.length && !sameGroup(arr[j])) j++;
+      if (j < arr.length) { arr.splice(i, 1); arr.splice(j, 0, o); }
+      else if (!o.top) { arr.splice(i, 1); o.top = true; const firstTop = arr.findIndex((x) => x.top); arr.splice(firstTop < 0 ? arr.length : firstTop, 0, o); }
+    } else if (act === 'bwd') {
+      let j = i - 1; while (j >= 0 && !sameGroup(arr[j])) j--;
+      if (j >= 0) { arr.splice(i, 1); arr.splice(j, 0, o); }
+      else if (o.top) { arr.splice(i, 1); o.top = false; const firstTop = arr.findIndex((x) => x.top); arr.splice(firstTop < 0 ? arr.length : firstTop, 0, o); }
+    }
+  }
+  renderBase(); renderLive(); scheduleSave(); updateChrome();
+  toast(sel && sel.images[0] && sel.images[0].top ? 'In front of the ink' : 'Behind the ink');
+}
 function pointInPoly(x, y, P) {
   let ins = false;
   for (let i = 0, j = P.length - 2; i < P.length; j = i, i += 2) {
@@ -1188,6 +1218,7 @@ function lassoSelect(P) {
 }
 function tapSelect(w) {
   const pg = page(), r = 10 / view.s;
+  for (let i = pg.images.length - 1; i >= 0; i--) { const o = pg.images[i]; if (o.top && !o.fill && w[0] >= o.x && w[0] <= o.x + o.w && w[1] >= o.y && w[1] <= o.y + o.h) return makeSel([], [o], []); }
   for (let i = pg.texts.length - 1; i >= 0; i--) { const t = pg.texts[i]; if (w[0] >= t.x && w[0] <= t.x + t.w && w[1] >= t.y && w[1] <= t.y + textH(t)) return makeSel([], [], [t]); }
   for (let i = pg.strokes.length - 1; i >= 0; i--) { const st = pg.strokes[i], rr = r + st.w / 2; for (let k = 0; k < st.pts.length; k += 3) if (Math.hypot(st.pts[k] - w[0], st.pts[k + 1] - w[1]) < rr) return makeSel([st], [], []); }
   for (let i = pg.images.length - 1; i >= 0; i--) { const o = pg.images[i]; if (w[0] >= o.x && w[0] <= o.x + o.w && w[1] >= o.y && w[1] <= o.y + o.h) return makeSel([], [o], []); }
