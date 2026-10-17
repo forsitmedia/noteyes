@@ -138,6 +138,7 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
 #stage{position:absolute;inset:0;touch-action:none}
 #stage canvas{position:absolute;inset:0;width:100%;height:100%}
 #live{touch-action:none}
+#file{position:fixed;left:50%;top:40%;width:2px;height:2px;opacity:0;pointer-events:none;z-index:-1}
 #ted{position:absolute;z-index:4;margin:0;padding:0;border:0;outline:1.5px dashed var(--accent);outline-offset:6px;border-radius:2px;background:transparent;resize:none;overflow:hidden;line-height:1.3;font-family:var(--f-body);white-space:pre-wrap;transform-origin:0 0;user-select:text;-webkit-user-select:text}
 .topbar{position:absolute;z-index:5;top:calc(10px + env(safe-area-inset-top,0px));left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));display:flex;gap:10px;align-items:center;pointer-events:none;flex-wrap:wrap}
 .bar{pointer-events:auto;display:flex;align-items:center;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:4px;box-shadow:0 6px 20px -10px var(--shadow)}
@@ -219,7 +220,7 @@ input[type=range]::-moz-range-thumb{width:46px;height:28px;border-radius:14px;ba
   <div class="rail" id="rail"></div>
   <div class="ctx" id="ctx" hidden></div>
 </div>
-<input type="file" id="file" accept="image/*" hidden>
+<input type="file" id="file" accept="image/*" tabindex="-1" aria-hidden="true">
 
 <script>
 (() => {
@@ -1489,8 +1490,13 @@ function bucketFill(w) {
   renderBase(); renderLive(); scheduleSave();
 }
 let pendingPlace = null;
-function placeImageAt(pt) { activatePageAt(pt); pendingPlace = { pi: pageIdx, w: toWorld(pt) }; pickImage(false, true); }
-function pickImage(asNew, keepPlace) { if (!keepPlace) pendingPlace = null; pendingNewFromPhoto = asNew; const f = $('#file'); f.value = ''; f.click(); }
+function placeImageAt(pt) {
+  activatePageAt(pt); pendingPlace = { pi: pageIdx, w: toWorld(pt) };
+  const r = stage.getBoundingClientRect(), f = $('#file');   // the system picker menu anchors to this input, so park it on the tap
+  f.style.left = (r.left + pt[0]) + 'px'; f.style.top = (r.top + pt[1]) + 'px';
+  pickImage(false, true);
+}
+function pickImage(asNew, keepPlace) { if (!keepPlace) { pendingPlace = null; const f0 = $('#file'); f0.style.left = '50%'; f0.style.top = '40%'; } pendingNewFromPhoto = asNew; const f = $('#file'); f.value = ''; f.click(); }
 $('#file').addEventListener('change', () => {
   const file = $('#file').files[0]; if (!file) return;
   const rd = new FileReader();
