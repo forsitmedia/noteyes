@@ -1452,7 +1452,19 @@ function eraseAt(w, prev) {
   }
   const keep = pg.images.filter((o) => !(o.fill && fillTouched(o, w, prev, r)));
   if (keep.length !== pg.images.length) { pg.images = keep; changed = true; }
+  const keepT = pg.texts.filter((t) => !textTouched(t, w, prev, r));
+  if (keepT.length !== pg.texts.length) { pg.texts = keepT; changed = true; }
   if (changed) { pg.strokes = out; action.changed = true; queueBase(); }
+}
+/* text objects: the eraser removes one when it passes over its box */
+function textTouched(t, w, prev, r) {
+  const x0 = t.x, x1 = t.x + t.w, y0 = t.y, y1 = t.y + textH(t);
+  const n = Math.max(1, Math.ceil(Math.hypot(w[0] - prev[0], w[1] - prev[1]) / Math.max(2, r / 2)));
+  for (let i = 0; i <= n; i++) {
+    const x = prev[0] + (w[0] - prev[0]) * i / n, y = prev[1] + (w[1] - prev[1]) * i / n;
+    if (x >= x0 - r * .4 && x <= x1 + r * .4 && y >= y0 - r * .4 && y <= y1 + r * .4) return true;
+  }
+  return false;
 }
 /* bucket fills are images: the eraser removes one when it passes over a painted pixel */
 const alphaCache = new Map();
