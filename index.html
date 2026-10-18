@@ -1739,13 +1739,14 @@ function magicBar(pg, texts, lines) {
   const t = texts[0], alts = (lines[0].alts || []).filter((x) => x.trim() && x !== t.text).slice(0, 3);
   const el = magicBarEl = document.createElement('div'); el.className = 'magicbar';
   el.innerHTML = `<span>✨ ${esc(lines.map((l) => l.text).join(' ').slice(0, 48))}</span>` + (texts.length === 1 ? alts.map((a, i) => `<button data-alt="${i}">${esc(a)}</button>`).join('') : '') + '<button data-undo>Keep my writing</button>';
-  el.onclick = (e) => {
+  ['touchstart', 'touchmove'].forEach((n) => el.addEventListener(n, (e) => e.stopPropagation()));   // stage cancels touchstart, which would swallow the tap
+  el.addEventListener('pointerdown', (e) => e.stopPropagation());
+  el.addEventListener('pointerup', (e) => {
     if (e.target.closest('[data-undo]')) { doUndo(); hideMagicBar(); return; }
     const b = e.target.closest('[data-alt]'); if (!b) return;
     const txt = alts[+b.dataset.alt]; pushUndo({ pg, strokes: pg.strokes.slice(), images: pg.images.map((o) => ({ ...o })), texts: pg.texts.map((q) => ({ ...q })) });
-    t.text = txt; mctx.font = fontFor(t.size, t.font); t.w = Math.ceil(mctx.measureText(txt).width) + 30; renderBase(); renderLive(); scheduleSave(); hideMagicBar();
-  };
-  stage.appendChild(el); magicBarT = setTimeout(hideMagicBar, 9000);
+    t.text = txt; mctx.font = fontFor(t.size, t.font); t.w = Math.ceil(mctx.measureText(txt).width) + 30; renderBase(); renderLive(); scheduleSave(); hideMagicBar();});
+  stage.appendChild(el); magicBarT = setTimeout(hideMagicBar, 14000);
   const sc = view.s, x = view.ox + t.x * sc, y = view.oy + (pg === page() ? poy() : 0) + (t.y + t.size * 1.35) * sc;
   el.style.left = clamp(x, 8, Math.max(8, W - el.offsetWidth - 8)) + 'px'; el.style.top = clamp(y, 70, H - el.offsetHeight - 12) + 'px';
 }
